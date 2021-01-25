@@ -15,21 +15,6 @@ mulla = lambda amount: locale.currency(amount, grouping=True)
 flt = np.single
 ZERO = 1e-5
 
-API_MARKETSTACK = { 'access_key': os.environ['API_MARKETSTACK_KEY'], }
-DB_MARKETSTACK = {}
-def marketstack(ticker):
-    global DB_MARKETSTACK
-
-    if ticker not in DB_MARKETSTACK:
-        api_result = requests.get(
-            'http://api.marketstack.com/v1/tickers/%s/eod?limit=1' % ticker,
-            API_MARKETSTACK
-        )
-        api_response = api_result.json()
-        DB_MARKETSTACK[ticker] = api_response['data']
-
-    return DB_MARKETSTACK[ticker]
-
 class Lot:
     ident = 0
 
@@ -201,16 +186,14 @@ class StockFIFO:
             self.qty, mulla(self.average), mulla(self.value)
         ))
         if fetch and self.qty > ZERO:
-            data = marketstack(self.ticker)
-            if data:
-                price = flt(data['eod'][0]['close'])
-                equity = self.qty * price
-                print("Value: %10.5f x %s = %s" % (
-                    self.qty, mulla(price), mulla(equity)
-                ))
-                print("Position: %s" % (
-                    mulla(equity - self.value)
-                ))
+            price = flt(rh.stocks.get_latest_price(self.ticker)[0])
+            equity = self.qty * price
+            print("Value: %10.5f x %s = %s" % (
+                self.qty, mulla(price), mulla(equity)
+            ))
+            print("Position: %s" % (
+                mulla(equity - self.value)
+            ))
 
         print()
 
@@ -224,7 +207,6 @@ class CSVReader:
         self.robinhood = None
 
         if not os.path.exists(filename):
-            self.connect()
             self.importer('.', file_name=filename)
 
         with open(filename, newline='') as fh:
@@ -241,14 +223,6 @@ class CSVReader:
 
     def get(self, field):
         return self.active[self.header.index(field)]
-
-    def connect(self):
-        if self.robinhood is None:
-            with open(os.path.join(Path.home(), ".rhrc")) as fh:
-                username, password = fh.readline().split(',')
-                self.robinhood = rh.login(username, password)
-
-        return self.robinhood
 
     @property
     def timestamp(self):
@@ -341,6 +315,9 @@ class Account:
     def __init__(self):
         self.portfolio = {}
 
+        self.robinhood = None
+        self.connect()
+
         self.stockReader = StockReader()
         self.optionReader = OptionReader()
 
@@ -349,6 +326,14 @@ class Account:
             self.portfolio[ticker] = StockFIFO(ticker)
 
         return self.portfolio[ticker]
+
+    def connect(self):
+        if self.robinhood is None:
+            with open(os.path.join(Path.home(), ".rhrc")) as fh:
+                username, password = fh.readline().split(',')
+                self.robinhood = rh.login(username, password)
+
+        return self.robinhood
 
     def transactions(self):
         stock, option = next(self.stockReader), next(self.optionReader)
