@@ -23,6 +23,26 @@ deactivate
 # DEMO
 
 ## Sample Query on a Stock
+1. Set up a free MarketStack account to pull latest exchange data
+
+https://marketstack.com
+
+2. Export your API key
+
+```
+export API_MARKETSTACK_KEY=...
+```
+
+3. Set up your Robinhood account access
+
+```
+touch ~/.rhrc
+chmod 0600 ~/.rhrc
+echo "${RH_USERNAME?},${RH_PASSWORD} > ~/.rhrc
+```
+
+4. Run a query on a stock you have traded in
+
 ```
 $ python3 rh.py ROKU
 ################################################################################
