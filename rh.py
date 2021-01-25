@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import dateutil.parser as dtp
 import robin_stocks as rh
+import click
 
 mulla = lambda amount: locale.currency(amount, grouping=True)
 flt = np.single
@@ -31,7 +32,7 @@ class Lot:
         self.description = description
 
     def __repr__(self):
-        string = '#%05d %-4s:%4s[%20s] %8.2f x %10s = %10s @ %s' % (
+        string = '#%05d %-4s:%4s[%9s] %8.2f x %10s = %10s @ %s' % (
             self.ident,
             self.ticker,
             self.side,
@@ -174,7 +175,7 @@ class StockFIFO:
             print(sfmt(lot.qty, lot))
             cb += lot.qty * lot.price
 
-            print("Cost Basis: %s" % mulla(cb))
+            print('Cost Basis: %s' % mulla(cb))
             print()
 
         # Remaining buys (without sells)
@@ -321,6 +322,8 @@ class Account:
         self.stockReader = StockReader()
         self.optionReader = OptionReader()
 
+        self.slurp()
+
     def __getitem__(self, ticker):
         if ticker not in self.portfolio:
             self.portfolio[ticker] = StockFIFO(ticker)
@@ -334,6 +337,10 @@ class Account:
                 self.robinhood = rh.login(username, password)
 
         return self.robinhood
+
+    def slurp(self):
+        for ticker, parameters in self.transactions():
+            self[ticker].push(*parameters)
 
     def transactions(self):
         stock, option = next(self.stockReader), next(self.optionReader)
@@ -353,28 +360,23 @@ class Account:
 
             yield ticker, parameters
 
-    def slurp(self, tickers=None):
-        for ticker, parameters in self.transactions():
-            if tickers is None or ticker in tickers:
-                self[ticker].push(*parameters)
-
-    def tickers(self):
+    def tickers(self, tickers=[]):
         for ticker, stock in self.portfolio.items():
-            yield ticker, stock
+            if len(tickers) == 0 or ticker in map(str.upper, tickers):
+                yield ticker, stock
 
+@click.group()
 def main():
     locale.setlocale(locale.LC_ALL, '')
 
+@main.command(help='Account history')
+@click.argument('tickers', nargs=-1)
+@click.option('-F', '--fetch', is_flag=True)
+def history(tickers, fetch):
     account = Account()
 
-    tickers = None
-    if len(sys.argv) > 1:
-        tickers = sys.argv[1].split(',')
-
-    account.slurp(tickers)
-
-    for ticker, stock in account.tickers():
-        stock.summarize(fetch=(tickers is not None))
+    for ticker, stock in account.tickers(tickers):
+        stock.summarize(fetch)
 
 if __name__ == '__main__':
     main()
