@@ -2,55 +2,175 @@
 
 import os, sys, locale
 import csv, requests
+import click, pickle, json
+import math, hashlib, random
 
+import pytz
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict, namedtuple
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import dateutil.parser as dtp
 import robin_stocks as rh
-import click
+from collections import defaultdict, Counter
 
-mulla = lambda amount: locale.currency(amount, grouping=True)
-flt = np.single
+from pygments import highlight
+from pygments.lexers import PythonLexer
+from pygments.formatters import Terminal256Formatter
+
+from pprint import pformat
+
+from beautifultable import BeautifulTable
+from colorama import init, Back, Fore
+from termcolor import colored
+
+CACHE_DIR='/tmp'
+
+def dump(heading, obj):
+    return '%s\n%s' % (
+        heading,
+        highlight((json.dumps(obj, indent=4)), PythonLexer(), Terminal256Formatter()),
+    )
+
+def c(f, n, d, v):
+    n = flt(n)
+    c = d[0]
+    for i, v in enumerate(v):
+        if v < n:
+            c = d[i+1]
+
+    return colored(f % n, c)
+
+def mulla(m):
+    c = 'red' if flt(m) < 0 else 'green'
+    return colored(locale.currency(flt(m), grouping=True), c)
+
 ZERO = 1e-5
 
-class Lot:
-    ident = 0
+flt = np.single
+rnd = lambda a, r: round(a / r) * r
+sgn = lambda n: -1 if n <= 0 else 1
 
-    def __init__(self, ticker, side, qty, price, timestamp, description):
-        self.ident = Lot.ident
-        Lot.ident += 1
+pct = lambda p: c('%0.2f%%', p, ['red', 'green', 'magenta'], [0, 70])
+qty = lambda q, dp=2: c(f'%0.{dp}f', q, ['yellow', 'cyan'], [0])
+
+fmt = lambda f, d: lambda k: f.get(k, str)(d.get(k, -1))
+
+now = lambda: pytz.UTC.localize(datetime.now())
+
+class StockSplitEvent:
+    def __init__(self, date, multiplier, divisor):
+        self.timestamp = pytz.UTC.localize(dtp.parse(date))
+        self.multiplier = flt(multiplier)
+        self.divisor = flt(divisor)
+
+    def settle(self, stock):
+        stock.qty *= self.multiplier
+        stock.qty /= self.divisor
+
+    @property
+    def unsettled(self):
+        return 0
+
+
+class TransactionEvent:
+    ident = 0
+    tally = defaultdict(int)
+
+    @property
+    def signum(self):
+        return { 'buy': +1, 'sell': -1 }[self.side]
+
+    def settle(self, stock):
+        TransactionEvent.tally[self.ticker] += self.signum * self.qty
+        self.running = TransactionEvent.tally[self.ticker]
+        LotConnector.settle(stock)
+
+    def tie(self, tie):
+        if self.ticker in DEBUG:
+            print('tying self to another', self, tie)
+        self.ties.append(tie)
+
+    def __init__(self, ticker, side, qty, price, timestamp, otype):
+        self.ident = TransactionEvent.ident
+        TransactionEvent.ident += 1
 
         self.side = side
         self.ticker = ticker
-        self.price = flt(price)
         self.qty = flt(qty)
-        self.timestamp = timestamp
+        self.price = flt(price)
+        self.timestamp = dtp.parse(timestamp)
         self.ties = []
-        self.description = description
+        self.otype = otype
+        self.running = 0
 
     def __repr__(self):
-        string = '#%05d %-4s:%4s[%9s] %8.2f x %10s = %10s @ %s' % (
+        q = qty(self.qty)
+        if len(self.ties) > 0:
+            q = '%s (%s)' % (
+                q,
+                '+'.join([qty(tie.qty) for tie in self.ties])
+            )
+
+        rstr = '#%05d %s %s %s %s (cg=%s): %s x %s = %s @ %s' % (
             self.ident,
             self.ticker,
+            qty(self.running),
+            self.otype,
             self.side,
-            self.description,
-            self.qty,
+            self.term,
+            q,
             mulla(self.price),
             mulla(self.price * self.qty),
             self.timestamp,
         )
 
-        return '<%s>' % string
+        if self.side == 'sell':
+            cb = self.costbasis
+            stg = cb['st']['gain']
+            stq = cb['st']['qty']
+            ltg = cb['lt']['gain']
+            ltq = cb['lt']['qty']
+            rstr += ' | cb=[st=%sx%s=%s, lt=%sx%s=%s]' % (
+                mulla(stg), qty(stq), mulla(stg * stq),
+                mulla(ltg), qty(ltq), mulla(ltg * ltq),
+            )
 
-    def tie(self, conn):
-        self.ties.append(conn)
+        return '<TransactionEvent %s>' % rstr
 
     @property
-    def signum(self):
-        return -1 if self.side == 'buy' else +1
+    def term(self):
+        term = '--'
+        if self.side == 'buy':
+            if len(self.ties) == 1:
+                term = self.ties[0].term
+            else:
+                term = 'st' if (
+                    (now() - self.timestamp) <= timedelta(days=365, seconds=0)
+                ) else 'lt'
+
+        return term
+
+    @property
+    def costbasis(self):
+        assert self.side == 'sell'
+
+        # Does DIV go in here?
+        cb = {
+            'st': Counter({ 'qty': 0, 'gain': 0 }),
+            'lt': Counter({ 'qty': 0, 'gain': 0 }),
+        }
+
+        for tie in self.ties:
+            cb[tie.term]['qty'] += tie.qty
+            cb[tie.term]['gain'] -= tie.bought.price * tie.qty
+
+        for term in [t for t in ('st', 'lt') if cb[t]['qty'] > 0]:
+            cb[term]['gain'] += self.price * cb[term]['qty']
+            cb[term]['gain'] /= cb[term]['qty']
+
+        return cb
 
     @property
     def unsettled(self):
@@ -60,157 +180,201 @@ class Lot:
 
         Different things, but the same underlying calculation.
         '''
-        return self.qty - sum([conn.qty for conn in self.ties])
+        if self.ident == 126:
+            print(self.qty - sum([tie.qty for tie in self.ties]))
+        return self.qty - sum([tie.qty for tie in self.ties])
 
 class LotConnector:
     @classmethod
     def settle(self, stock):
-        index = stock.pointer
-        fifo = stock.fifo
-        sold = fifo[-1]
-        assert sold.side == 'sell'
+        event = stock.events[-1]
+        assert type(event) is TransactionEvent
 
-        qty = sold.qty
-        while qty > ZERO:
-            l = LotConnector(sold, stock, index)
-            qty -= l.qty
+        if event.side == 'buy':
+            stock.qty += event.qty
+        elif event.side == 'sell':
+            qty = event.qty
+            while qty > ZERO:
+                a = stock.pointer < len(stock.events)
+                if a:
+                    b = type(stock.events[stock.pointer]) is StockSplitEvent
+                    if b:
+                        stock.pointer += 1
+                    else:
+                        c = stock.events[stock.pointer].side == 'sell'
+                        d = stock.events[stock.pointer].unsettled <= ZERO
+                        if c or d:
+                            stock.pointer += 1
+                        else:
+                            l = LotConnector(event, stock)
+                            qty -= l.qty
+                else:
+                    l = LotConnector(event, stock)
+                    qty -= l.qty
 
-            while index < len(fifo) and (
-                fifo[index].side == 'sell' or fifo[index].unsettled <= ZERO
-            ):
-                index += 1
+    def __init__(self, sold, stock):
+        events = stock.events
 
-        stock.pointer = index
-
-    def __init__(self, sold, stock, index):
-        fifo = stock.fifo
-
-        if len(fifo) == index:
-            fifo.append(
-                Lot(
-                    stock.ticker,
-                    'buy',
-                    sold.unsettled,
-                    0.00,
-                    dtp.parse("1st Jan 2020, 12:00:00 am"),
-                    'FREE',
+        self.sold, self.bought = sold, None
+        while self.bought is None or self.bought.side != 'buy' or self.bought.unsettled <= ZERO:
+            if self.bought is not None:
+                stock.pointer += 1
+            if stock.pointer == len(events):
+                print('FIXME', sold)
+                events.append(
+                    TransactionEvent(
+                        stock.ticker,
+                        'buy',
+                        sold.unsettled,
+                        0.00,
+                        str(datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc)),
+                        'FREE',
+                    )
                 )
-            )
+            self.bought = events[stock.pointer]
 
-        self.sold, self.bought = sold, fifo[index]
         self.qty = min((self.sold.unsettled, self.bought.unsettled))
+        self.term = 'st' if (
+            (self.sold.timestamp - self.bought.timestamp) <= timedelta(days=365, seconds=0)
+        ) else 'lt'
         self.sold.tie(self)
         self.bought.tie(self)
 
     def __repr__(self):
-        return '%s <--(x%0.5f)--> %s' % (
+        return '%s <--(x%0.5f:%s)--> %s' % (
             self.sold,
             self.qty,
+            self.term,
             self.bought,
         )
 
-
-class StockFIFO:
-    @property
-    def qty(self):
-        return sum([-t.signum * t.qty for t in self.fifo])
-
+class StockFILO:
     @property
     def timestamp(self):
-        return self.fifo[-1].timestamp
+        return self.events[-1].timestamp
 
     @property
     def value(self):
-        return sum([t.price * t.unsettled for t in self.fifo if t.side == 'buy'])
+        return sum([
+            e.price * e.unsettled
+            for e in self.transactions
+            if e.side == 'buy'
+        ])
 
     @property
     def average(self):
-        return self.value / self.qty if self.value and self.qty else 0
+        return self.value / self.qty if self.qty > 0 else 0
 
-    def __init__(self, ticker):
+    @property
+    def transactions(self):
+        return [e for e in self.events if type(e) is TransactionEvent]
+
+    def __init__(self, account, ticker):
+        self.account = account
         self.ticker = ticker
+        self.qty = 0
         self.pointer = 0
-        self.fifo = []
+        self.events = []
+        self.event_pool = sorted(
+            [
+                StockSplitEvent(
+                    date=ss['execution_date'],
+                    multiplier=ss['multiplier'],
+                    divisor=ss['divisor'],
+                ) for ss in account.cached(2592000, 'stocks', 'splits', ticker)
+            ] + [
+                TransactionEvent(
+                    self.ticker,
+                    ec['side'],
+                    ec['quantity'],
+                    ec['price'],
+                    se['updated_at'],
+                    se['type'],
+                ) for se in account.cached(2592000, 'stocks', 'events', ticker)
+                    for ec in se['equity_components']
+            ], key=lambda e: e.timestamp
+        )
 
     def __getitem__(self, i):
-        return self.fifo[i]
+        return self.events[i]
 
     def __repr__(self):
-        raise
-        return '<StockFIFO:%-5s x %8.2f @ %s>' % (
+        return '<StockFILO:%-5s x%8.2f @ mean:%s>' % (
             self.ticker,
             self.qty,
             mulla(self.average),
         )
 
-    def push(self, qty, price, side, timestamp, description):
-        self.fifo.append(
-            Lot(
-                self.ticker,
-                side,
-                qty,
-                price,
-                timestamp,
-                description,
-            )
+    def push(self, qty, price, side, timestamp, otype):
+        transaction = TransactionEvent(
+            self.ticker,
+            side,
+            qty,
+            price,
+            timestamp,
+            otype,
         )
+        self.event_pool.append(transaction)
+        self.event_pool.sort(key=lambda e: e.timestamp)
+        e = None
+        while e is not transaction:
+            e = self.event_pool.pop(0)
+            self.events.append(e)
+            e.settle(self)
 
-        if side == 'sell':
-            LotConnector.settle(self)
+    @property
+    def price(self):
+        return self.account.get_price(self.ticker)
 
-    def summarize(self, fetch=False):
+    @property
+    def equity(self):
+        return self.qty * self.price
+
+    @property
+    def cost(self):
+        return self.value
+
+    @property
+    def gain(self):
+        return self.equity - self.cost
+
+    def summarize(self):
         print('#' * 80)
 
-        sfmt = lambda qty, lot: '%10.5f %s' % (qty, lot)
-        for lot in self.fifo:
-            if lot.side == 'buy': continue
+        for event in self.events:
+            if event.side == 'buy': continue
+            elif event.side == 'sell':
+                # The buys
+                print('buys:', len(event.ties))
+                for tie in event.ties:
+                    print(tie.bought)
 
-            # The buys
-            cb = 0
-            for tie in lot.ties:
-                cb -= tie.qty * tie.bought.price
-                print(sfmt(tie.qty, tie.bought))
+                # The sell
+                print(event)
+                print()
 
-            # The sell
-            print(sfmt(lot.qty, lot))
-            cb += lot.qty * lot.price
+        # Remaining buys (without a corresponding sell; current equity)
+        for event in self.events[self.pointer:]:
+            if event.side == 'sell': continue
+            print(event)
 
-            print('Cost Basis: %s' % mulla(cb))
-            print()
-
-        # Remaining buys (without sells)
-        for lot in self.fifo[self.pointer:]:
-            if lot.side == 'buy':
-                print(sfmt(lot.qty, lot))
-
-        print("Cost : %10.5f x %s = %s" % (
-            self.qty, mulla(self.average), mulla(self.value)
-        ))
-        if fetch and self.qty > ZERO:
-            price = flt(rh.stocks.get_latest_price(self.ticker)[0])
-            equity = self.qty * price
-            print("Value: %10.5f x %s = %s" % (
-                self.qty, mulla(price), mulla(equity)
-            ))
-            print("Position: %s" % (
-                mulla(equity - self.value)
-            ))
-
+        print("Cost : %s x %s = %s" % (qty(self.qty), mulla(self.average), mulla(self.cost)))
+        print("Value: %s x %s = %s" % (qty(self.qty), mulla(self.price), mulla(self.equity)))
+        print("Capital Gains: %s" % (mulla(self.gain)))
         print()
 
 
 class CSVReader:
-    def __init__(self, filename, importer):
-        self.filename = filename
-        self.importer = importer
-
+    def __init__(self, account, importer):
         self.active = None
-        self.robinhood = None
 
-        if not os.path.exists(filename):
-            self.importer('.', file_name=filename)
-
-        with open(filename, newline='') as fh:
+        account.cached(
+            604800 if importer == 'stock' else 900,
+            'export', importer,
+            CACHE_DIR, '%s/%s' % (CACHE_DIR, importer),
+        )
+        self.cachefile = os.path.join(CACHE_DIR, '%s.csv' % importer)
+        with open(self.cachefile, newline='') as fh:
             reader = csv.reader(fh, delimiter=',', quotechar='"')
             self.header = next(reader)
             self.reader = reversed(list(reader))
@@ -220,7 +384,8 @@ class CSVReader:
 
     def __next__(self):
         self.active = next(self.reader, None)
-        return self if self.active else None
+        if self.active: return self
+        raise StopIteration
 
     def get(self, field):
         return self.active[self.header.index(field)]
@@ -238,7 +403,7 @@ class CSVReader:
         return self.get('side')
 
     @property
-    def description(self):
+    def otype(self):
         raise NotImplementedError
 
     @property
@@ -247,16 +412,17 @@ class CSVReader:
 
 
 class StockReader(CSVReader):
-    def __init__(self, filename='stocks.csv', importer=rh.export_completed_stock_orders):
-        super().__init__(filename, importer)
+    def __init__(self, account, importer='stock'):
+        super().__init__(account, importer)
         self._ticker_field = 'symbol'
 
     @property
     def timestamp(self):
+        return self.get('date')
         return dtp.parse(self.get('date'))
 
     @property
-    def description(self):
+    def otype(self):
         return self.get('order_type')
 
     @property
@@ -266,13 +432,13 @@ class StockReader(CSVReader):
             flt(self.get('average_price')),
             self.side,
             self.timestamp,
-            self.description,
+            self.otype,
         )
 
 
 class OptionReader(CSVReader):
-    def __init__(self, filename='options.csv', importer=rh.export_completed_option_orders):
-        super().__init__(filename, importer)
+    def __init__(self, account, importer='option'):
+        super().__init__(account, importer)
         self._ticker_field = 'chain_symbol'
 
     @property
@@ -297,9 +463,8 @@ class OptionReader(CSVReader):
         return side
 
     @property
-    def description(self):
-        side, otype = self.get('side'), self.get('option_type')
-        return '%s %s' % (side, otype)
+    def otype(self):
+        return self.get('option_type')
 
     @property
     def parameters(self):
@@ -308,41 +473,275 @@ class OptionReader(CSVReader):
             flt(self.get('strike_price')),
             self.side,
             self.timestamp,
-            self.description,
+            '%s %s' % (self.side, self.otype,)
         )
 
 
 class Account:
-    def __init__(self):
-        self.portfolio = {}
+    # TODO: Move this and related functions to CLI code
+    functions = {
+        'profiles': {
+            'account'     : rh.profiles.load_account_profile,
+            'investment'  : rh.profiles.load_investment_profile,
+            'portfolio'   : rh.profiles.load_portfolio_profile,
+            'security'    : rh.profiles.load_security_profile,
+            'user'        : rh.profiles.load_user_profile,
+        },
+        'stocks': {
+            'earning'     : rh.stocks.get_earnings,
+            'events'      : rh.stocks.get_events,
+            'fundamentals': rh.stocks.get_fundamentals,
+            'instruments' : rh.stocks.get_instruments_by_symbols,
+            'instrument'  : rh.stocks.get_instrument_by_url,
+            'prices'      : rh.stocks.get_latest_price,
+            'news'        : rh.stocks.get_news,
+            'quotes'      : rh.stocks.get_quotes,
+            'ratings'     : rh.stocks.get_ratings,
+            'splits'      : rh.stocks.get_splits,
+            'historicals' : rh.stocks.get_stock_historicals,
+        },
+        'options': {
+            'positions:all'  : rh.options.get_all_option_positions,
+            'positions:open' : rh.options.get_open_option_positions,
+            'positions:agg'  : rh.options.get_aggregate_positions,
+            'chains'         : rh.options.get_chains,
+        },
+        'orders': {
+            'options:open'   : rh.orders.get_all_open_option_orders,
+            'options:all'    : rh.orders.get_all_option_orders,
+            'stocks:open'    : rh.orders.get_all_open_stock_orders,
+            'stocks:all'     : rh.orders.get_all_stock_orders,
+        },
+        'markets': {
+            'movers'         : rh.markets.get_top_movers,
+        },
+        'account': {
+            'notifications'  : rh.account.get_latest_notification,
+            'positions:all'  : rh.account.get_all_positions,
+            'positions:open' : rh.account.get_open_stock_positions,
+            'margin'         : rh.account.get_margin_interest,
+            'dividends:total': rh.account.get_total_dividends,
+            'dividends'      : rh.account.get_dividends,
+            'fees'           : rh.account.get_subscription_fees,
+            'phoenix'        : rh.account.load_phoenix_account,
+            'holdings'       : rh.account.build_holdings,
+        },
+        'export': {
+            'stock'          : rh.export_completed_stock_orders,
+            'option'         : rh.export_completed_option_orders,
+        },
+    }
 
+    def __init__(self):
         self.robinhood = None
         self.connect()
 
-        self.stockReader = StockReader()
-        self.optionReader = OptionReader()
+        self.portfolio = {}
+        self.tickers = None
+        self.stockReader = StockReader(self)
+        self.optionReader = OptionReader(self)
 
-        self.slurp()
+        self.data = None
 
     def __getitem__(self, ticker):
         if ticker not in self.portfolio:
-            self.portfolio[ticker] = StockFIFO(ticker)
+            self.portfolio[ticker] = StockFILO(self, ticker)
 
         return self.portfolio[ticker]
+
+    def connected(fn):
+        def connected(self, *args, **kwargs):
+            self.connect()
+            return fn(self, *args, **kwargs)
+        return connected
 
     def connect(self):
         if self.robinhood is None:
             with open(os.path.join(Path.home(), ".rhrc")) as fh:
                 username, password = fh.readline().split(',')
-                self.robinhood = rh.login(username, password)
+                self.robinhood = rh.login(username.strip(), password.strip())
 
         return self.robinhood
 
-    def slurp(self):
+    def slurp(self, ttl=300):
         for ticker, parameters in self.transactions():
+            if ticker in DEBUG:
+                print(ticker, parameters)
             self[ticker].push(*parameters)
 
+        self.data = self.cached(3 * ttl, 'account', 'holdings')
+        self.tickers = sorted(self.data.keys())
+
+        costbasis = self._get_costbasis()
+        for ticker in self.tickers:
+            self.data[ticker].update(costbasis[ticker])
+
+        positions = self._get_positions()
+        dividends = self._get_dividends()
+        prices = self._get_prices()
+        fundamentals = self._get_fundamentals()
+
+        for ticker, datum in self.data.items():
+            datum['ticker'] = ticker
+            datum['premium_collected'] = positions['premiums'][ticker]
+            datum['dividends_collected'] = sum([
+                float(div['amount']) for div in dividends[ticker]
+            ])
+            datum['activities'] = '\n'.join(positions['activities'].get(ticker, []))
+            datum['pe_ratio'] = flt(fundamentals[ticker]['pe_ratio'])
+            datum['pb_ratio'] = flt(fundamentals[ticker]['pb_ratio'])
+            datum['price'] = flt(prices[ticker])
+
+    def _get_costbasis(self):
+        #TODO: Add realized as well as unrealized for this data
+        costbasis = defaultdict(Counter)
+        for ticker, stock in self.portfolio.items():
+            costbasis[ticker].update({
+                '_cost': stock.cost,
+                '_equity': stock.equity,
+                '_gain': stock.gain,
+            })
+            for trans in (t for t in stock.transactions if t.side == 'sell'):
+                costbasis[ticker].update({
+                    'st_cb_qty':     trans.costbasis['st']['qty'],
+                    'st_cb_capgain': trans.costbasis['st']['gain'],
+                    'lt_cb_qty':     trans.costbasis['lt']['qty'],
+                    'lt_cb_capgain': trans.costbasis['lt']['gain'],
+                })
+        return costbasis
+
+    def _get_dividends(self, ttl=300):
+        dividends = defaultdict(list)
+        for datum in self.cached(ttl, 'account', 'dividends'):
+            uri = datum['instrument']
+            ticker = self.cached(ttl, 'stocks', 'instrument', uri, 'symbol')
+            instrument = self.cached(6*ttl, 'stocks', 'instrument', uri)
+            dividends[ticker].append(datum)
+        return dividends
+
+    def _get_fundamentals(self, ttl=300):
+        return dict(
+            zip(
+                self.tickers,
+                self.cached(ttl, 'stocks', 'fundamentals', self.tickers)
+            )
+        )
+
+    def get_price(self, ticker):
+        return self._get_prices().get(
+            ticker,
+            flt(self.cached(5*300, 'stocks', 'prices', ticker)[0])
+        )
+
+    def _get_prices(self, ttl=300):
+        return dict(
+            zip(
+                self.tickers,
+                map(flt, self.cached(3 * ttl, 'stocks', 'prices', self.tickers))
+            )
+        )
+
+    def _get_positions(self, ttl=300):
+        data = self.cached(ttl, 'options', 'positions:all')
+
+        activities = defaultdict(list)
+        for option in [o for o in data if flt(o['quantity']) != 0]:
+            ticker = option['chain_symbol']
+
+            uri = option['option']
+            instrument = self.cached(3*ttl, 'stocks', 'instrument', uri)
+            if instrument['state'] == 'expired':
+                raise
+            elif instrument['tradability'] == 'untradable':
+                raise
+
+            premium = 0
+            if instrument['state'] != 'queued':
+                #signum = -1 if option['type'] == 'short' else +1
+                premium -= flt(option['quantity']) * flt(option['average_price'])
+
+            activities[ticker].append("%s %s %s x%s K=%s X=%s P=%s" % (
+                instrument['state'],
+                option['type'],
+                instrument['type'],
+                qty(option['quantity'], 0),
+                mulla(instrument['strike_price']),
+                instrument['expiration_date'],
+                mulla(premium),
+            ))
+
+        premiums = defaultdict(lambda: 0)
+        data = self.cached(6*ttl, 'orders', 'options:all')
+        for option in [o for o in data if o['state'] not in ('cancelled', 'expired')]:
+            ticker = option['chain_symbol']
+
+            if ticker in DEBUG:
+                print('#' * 80)
+                dprint(option, title='orders.options:all')
+
+            strategies = []
+            o, c = option['opening_strategy'], option['closing_strategy']
+            if o:
+                t, i = o.split('_')
+                strategies.append('o[%s %s]' % (t, i))
+            if c:
+                t, i = c.split('_')
+                strategies.append('c[%s %s]' % (t, i))
+
+            legs = []
+            premium = 0
+            for leg in option['legs']:
+                uri = leg['option']
+                instrument = self.cached(900, 'stocks', 'instrument', uri)
+
+                if ticker in DEBUG:
+                    dprint(instrument, title=f'stocks:instrument({uri})')
+
+                legs.append('%s to %s K=%s X=%s' % (
+                    leg['side'],
+                    leg['position_effect'],
+                    mulla(instrument['strike_price']),
+                    instrument['expiration_date'],
+                ))
+
+                premium += sum([
+                    100 * flt(x['price']) * flt(x['quantity']) for x in leg['executions']
+                ])
+
+            premium *= -1 if option['direction'] == 'debit' else +1
+            premiums[ticker] += premium
+
+            activities[ticker].append("%s %s %s x%s P=%s K=%s" % (
+                option['state'],
+                option['type'],
+                '/'.join(strategies),
+                qty(option['quantity'], 0),
+                mulla(premium),
+                mulla(instrument['strike_price']),
+            ))
+
+            for l in legs:
+                activities[ticker].append(' + l:%s' % l)
+
+        data = self.cached(600, 'orders', 'stocks:open')
+        for order in data:
+            uri = order['instrument']
+            ticker = self.cached(1800, 'stocks', 'instrument', uri, 'symbol')
+            activities[ticker].append("%s %s x%s @%s" % (
+                order['type'],
+                order['side'],
+                qty(order['quantity'], 0),
+                mulla(order['price']),
+            ))
+
+        return dict(premiums=premiums, activities=activities)
+
+    @connected
     def transactions(self):
+        for stock in self.stockReader:
+            yield stock.ticker, stock.parameters
+
+    def xxxxxxx(self):
         stock, option = next(self.stockReader), next(self.optionReader)
 
         ticker, parameters = None, None
@@ -360,23 +759,256 @@ class Account:
 
             yield ticker, parameters
 
-    def tickers(self, tickers=[]):
-        for ticker, stock in self.portfolio.items():
-            if len(tickers) == 0 or ticker in map(str.upper, tickers):
-                yield ticker, stock
+    @connected
+    def _machine(self, area, subarea, *args):
+        return Account.functions[area][subarea](*args)
+
+    def human(self, area, subarea, *args):
+        return dump(f'{area}:{subarea}', self._machine(area, subarea, *args))
+
+    @connected
+    def _pickled(self, cachefile, area, subarea, *args, **kwargs):
+        if cachefile.exists():
+            data = pickle.load(open(cachefile, 'rb'))
+        else:
+            data = Account.functions[area][subarea](*args, **kwargs)
+            arguments = [
+                ','.join(map(str, args)),
+                ','.join(['%s=%s' % (k, v) for k, v in kwargs]),
+            ]
+            dprint("Cache fault on %s:%s(%s)" % (
+                area, subarea, ','.join(arguments),
+            ))
+            pickle.dump(data, open(cachefile, 'wb'))
+
+        return data
+
+    def cached(self, ttl, area, subarea, *args, **kwargs):
+        uniqname = '-'.join([
+            area,
+            subarea,
+            hashlib.sha1(','.join(map(str, args)).encode()).hexdigest(),
+        ])
+        cachefile = Path(f'{CACHE_DIR}/{uniqname}.pkl')
+
+        data, age, fresh, now = {}, -1, False, datetime.now()
+        while not fresh:
+            data = self._pickled(cachefile, area, subarea, *args, **kwargs)
+
+            then = datetime.fromtimestamp(cachefile.lstat().st_mtime)
+            age = now - then
+
+            jitter = random.randint(0, +0.75 * ttl)
+            fresh = (ttl == -1) or age.total_seconds() < ttl + jitter
+            if not fresh:
+                cachefile.unlink()
+
+        return data
+
+
+CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
+
+DEBUG = []
+
+def dprint(data, title=None):
+    if len(DEBUG) == 0: return
+
+    title = '%s(%d entries)' % (f'{title} ' if title else '', len(data))
+    print(
+        dump(
+            f'[DEBUG:%s]-=[ %s ]=-' % (
+                ','.join(DEBUG),
+                title
+            ),
+            data
+        )
+    )
+
 
 @click.group()
-def main():
-    locale.setlocale(locale.LC_ALL, '')
+#@click.option('--debug/--no-debug', default=None)
+@click.option('-D', '--debug-tickers',multiple=True,  default=None)
+@click.pass_context
+def cli(ctx, debug_tickers):
+    global DEBUG
+    DEBUG=debug_tickers
+    ctx.ensure_object(dict)
 
-@main.command(help='Account history')
-@click.argument('tickers', nargs=-1)
-@click.option('-F', '--fetch', is_flag=True)
-def history(tickers, fetch):
-    account = Account()
+@cli.command(help='Stock Overview (raw API dumps)', context_settings=CONTEXT_SETTINGS)
+@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['stocks']))
+@click.option('-t', '--ticker', required=True)
+@click.pass_context
+def stocks(ctx, subarea, ticker):
+    account = ctx.obj['account']
+    print(account.human('stocks', subarea, ticker))
 
-    for ticker, stock in account.tickers(tickers):
-        stock.summarize(fetch)
+@cli.command(help='Options Overviews (raw API dumps)')
+@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['options']))
+@click.option('-t', '--ticker', required=False)
+@click.pass_context
+def options(ctx, subarea, ticker):
+    account = ctx.obj['account']
+    print(account.human('options', subarea, ticker))
+
+
+@cli.command(help='Overviews (raw API dumps)')
+@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['profiles']))
+@click.pass_context
+def profiles(ctx, subarea):
+    account = ctx.obj['account']
+    print(account.human('profiles', subarea))
+
+@cli.command(help='Account Overviews (raw API dumps)')
+@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['account']))
+@click.pass_context
+def account(ctx, subarea):
+    account = ctx.obj['account']
+    print(account.human('account', subarea))
+
+@cli.command(help='Market Overviews (raw API dumps)')
+@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['markets']))
+@click.pass_context
+def markets(ctx, subarea):
+    account = ctx.obj['account']
+    print(account.human('markets', subarea))
+
+VIEWS = {
+    'pie': {
+        'sort_by': 'rank',
+        'columns': [
+            'ticker',
+            'price', 'quantity', 'equity', 'percentage',
+            '_equity', '_cost', '_gain',
+            'short', 'bucket', 'rank',
+            'equity_change', 'percent_change',
+            'today', 'day', 'year',
+            'premium_collected', 'dividends_collected',
+            'activities',
+        ],
+    },
+    'tax': {
+        'sort_by': 'ticker',
+        'columns': [
+            'ticker',
+            'price',
+            'quantity',
+            'equity',
+            '_equity',
+            '_cost',
+            '_gain',
+            'st_cb_qty', 'st_cb_capgain',
+            'lt_cb_qty', 'lt_cb_capgain',
+            'premium_collected', 'dividends_collected',
+        ],
+    },
+}
+@cli.command(help='Views')
+@click.option('-v', '--view', default='pie', type=click.Choice(VIEWS.keys()))
+@click.option('-r', '--reverse', default=False, is_flag=True, type=bool)
+@click.option('-l', '--limit', default=-1, type=int)
+@click.pass_context
+def tabulize(ctx, view, reverse, limit):
+    account = ctx.obj['account']
+    account.slurp()
+
+    buckets = [ 0, 3, 5, 8, 13, 21, 34 ]
+    pie = { k: [] for k in buckets }
+
+    fundamentals = account._get_fundamentals()
+    for ticker, datum in account.data.items():
+        p = datum['price']
+        l = flt(fundamentals[ticker]['low'])
+        h = flt(fundamentals[ticker]['high'])
+        datum['day'] = 100 * (p - l) / h
+
+        o = flt(fundamentals[ticker]['open'])
+        datum['today'] = 100 * (p - o) / o
+
+        l = flt(fundamentals[ticker]['low_52_weeks'])
+        h = flt(fundamentals[ticker]['high_52_weeks'])
+        datum['year'] = 100 * (p - l) / h
+
+        eq = flt(datum['equity'])
+        datum['bucket'] = 0
+        datum['short'] = 0
+        for i, b in enumerate([s * 1000 for s in buckets[1:]]):
+            l, h = eq * 0.75, eq * 1.25
+            if l < b < h:
+                datum['bucket'] = b//1000
+                datum['short'] = rnd((eq - b) / datum['price'], 0.25)
+                break
+
+        # Rank = sum(
+        #     x for price down since open?
+        #     x for the horta; how short are you from reaching assigned bucket size
+        #     x for price as percentage from today's low to high
+        #     x for inverse of price as percentage from year's low to high
+        #     x for all-time percentage change (positive cost basis means more risk tolerance)
+        magnify = lambda p, x: x*(p+(100/x))/200
+        pctch = flt(datum['percent_change'])
+        eq = flt(datum['equity'])
+        datum['rank'] = sum([
+            50 * (eq / (datum['bucket'] * 1000) if datum['bucket'] > 0 else 0),
+            30 * magnify(datum['today'], 4),  # is stock down since open?
+            15 * magnify(datum['day'], 4),    # is stock down compared to low/high points, today?
+             5 * (pctch / 100)
+        ])
+
+    #if DEBUG:
+    #    for o in [o for o in account.cached(3600, 'account', 'positions:all')]:
+    #        dprint(o, title='account:positions:all')
+    #    for o in [o for o in account.cached(3600, 'options', 'positions:agg')]:
+    #        dprint(o, title='options.positions:agg')
+
+    formats = {
+        'bucket': lambda b: colored('$%dk' % b, 'blue'),
+        'today': pct,
+        'day': pct,
+        'year': pct,
+        'price': mulla,
+        'quantity': qty,
+        'average_buy_price': mulla,
+        'equity': mulla,
+        'percent_change': pct,
+        'equity_change': mulla,
+        'pe_ratio': qty,
+        'percentage': pct,
+        'rank': int,
+        'delta': qty,
+        'premium_collected': mulla,
+        'dividends_collected': mulla,
+        'st_cb_qty': qty,
+        'st_cb_capgain': mulla,
+        'lt_cb_qty': qty,
+        'lt_cb_capgain': mulla,
+    }
+
+    table = BeautifulTable(maxwidth=300)
+    table.set_style(BeautifulTable.STYLE_GRID)
+    table.columns.header = [h.replace('_', '\n') for h in VIEWS[view]['columns']]
+
+    if 'activate' in VIEWS[view]['columns']:
+        table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
+
+    for datum in account.data.values():
+        f = fmt(formats, datum)
+        table.rows.append([f(h) for h in VIEWS[view]['columns']])
+
+    table.rows.sort(VIEWS[view]['sort_by'], reverse)
+
+    print(table.rows[:limit] if limit > -1 else table)
+
+
+@cli.command(help='Account History')
+@click.pass_context
+def history(ctx):
+    account = ctx.obj['account']
+    account.slurp()
+    for ticker, stock in account.portfolio.items():
+        if len(DEBUG) > 0 and ticker not in DEBUG: continue
+        stock.summarize()
 
 if __name__ == '__main__':
-    main()
+    locale.setlocale(locale.LC_ALL, '')
+    rh.helper.set_output(open(os.devnull,"w"))
+    cli(obj={'account': Account()})
