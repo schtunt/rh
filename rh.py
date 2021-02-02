@@ -85,17 +85,20 @@ class Event:
     ident = 0
     tally = defaultdict(int)
 
-    def __init__(self):
+    mappings = {
+        'FCAU': 'STLA'
+    }
+    def __init__(self, ticker):
         self.running = 0
+        self.ticker = Event.mappings.get(ticker, ticker)
 
 class StockSplitEvent(Event):
     def __init__(self, ticker, date, multiplier, divisor):
-        super().__init__()
+        super().__init__(ticker)
 
         self.ident = Event.ident
         Event.ident += 1
 
-        self.ticker = ticker
         self.timestamp = pytz.UTC.localize(dtp.parse(date))
         self.multiplier = flt(multiplier)
         self.divisor = flt(divisor)
@@ -137,14 +140,13 @@ class TransactionEvent(Event):
     def tie(self, tie):
         self.ties.append(tie)
 
-    def __init__(self, ticker, side, qty, price, timestamp, otype):
-        super().__init__()
+    def __init__(self, ticker, qty, price, side, timestamp, otype):
+        super().__init__(ticker)
 
         self.ident = Event.ident
         Event.ident += 1
 
         self.side = side
-        self.ticker = ticker
         self.qty = flt(qty)
         self.price = flt(price)
         self.timestamp = dtp.parse(timestamp)
@@ -269,9 +271,9 @@ class LotConnector:
                 events.append(
                     TransactionEvent(
                         stock.ticker,
-                        'buy',
                         sold.unsettled,
                         0.00,
+                        'buy',
                         str(datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc)),
                         'FREE',
                     )
@@ -321,9 +323,9 @@ class StockFILO:
             ] + [
                 TransactionEvent(
                     self.ticker,
-                    ec['side'],
                     ec['quantity'],
                     ec['price'],
+                    ec['side'],
                     se['updated_at'],
                     se['type'],
                 ) for se in account.cached('stocks', 'events', ticker)
@@ -341,15 +343,7 @@ class StockFILO:
             mulla(self.average),
         )
 
-    def push(self, qty, price, side, timestamp, otype):
-        transaction = TransactionEvent(
-            self.ticker,
-            side,
-            qty,
-            price,
-            timestamp,
-            otype,
-        )
+    def push(self, transaction):
         self.event_pool.append(transaction)
         self.event_pool.sort(key=lambda e: e.timestamp)
         e = None
@@ -465,7 +459,6 @@ class StockReader(CSVReader):
     @property
     def timestamp(self):
         return self.get('date')
-        return dtp.parse(self.get('date'))
 
     @property
     def otype(self):
@@ -567,7 +560,8 @@ class Account:
 
     def slurp(self):
         for ticker, parameters in self.transactions():
-            self[ticker].push(*parameters)
+            transaction = TransactionEvent(ticker, *parameters)
+            self[transaction.ticker].push(transaction)
 
         self.data = self.cached('account', 'holdings')
         self.tickers = sorted(self.data.keys())
