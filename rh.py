@@ -59,42 +59,67 @@ fmt = lambda f, d: lambda k: f.get(k, str)(d.get(k, -1))
 
 now = lambda: pytz.UTC.localize(datetime.now())
 
-class StockSplitEvent:
-    def __init__(self, date, multiplier, divisor):
+class Event:
+    ident = 0
+    tally = defaultdict(int)
+
+    def __init__(self):
+        self.running = 0
+
+class StockSplitEvent(Event):
+    def __init__(self, ticker, date, multiplier, divisor):
+        super().__init__()
+
+        self.ident = Event.ident
+        Event.ident += 1
+
+        self.ticker = ticker
         self.timestamp = pytz.UTC.localize(dtp.parse(date))
         self.multiplier = flt(multiplier)
         self.divisor = flt(divisor)
 
+    def __repr__(self):
+        rstr = '#%05d %s %s stock-split %s-for-%s @ %s' % (
+            self.ident,
+            self.ticker,
+            qty(self.running),
+            qty(self.multiplier),
+            qty(self.divisor),
+            self.timestamp,
+        )
+
+        return '<StockSplitEvent  %s>' % rstr
+
+
     def settle(self, stock):
-        stock.qty *= self.multiplier
-        stock.qty /= self.divisor
+        Event.tally[self.ticker] *= self.multiplier
+        Event.tally[self.ticker] /= self.divisor
+        self.running = Event.tally[self.ticker]
 
     @property
     def unsettled(self):
         return 0
 
 
-class TransactionEvent:
-    ident = 0
-    tally = defaultdict(int)
+class TransactionEvent(Event):
 
     @property
     def signum(self):
         return { 'buy': +1, 'sell': -1 }[self.side]
 
     def settle(self, stock):
-        TransactionEvent.tally[self.ticker] += self.signum * self.qty
-        self.running = TransactionEvent.tally[self.ticker]
+        Event.tally[self.ticker] += self.signum * self.qty
+        self.running = Event.tally[self.ticker]
         LotConnector.settle(stock)
 
     def tie(self, tie):
-        if self.ticker in DEBUG:
-            print('tying self to another', self, tie)
         self.ties.append(tie)
 
     def __init__(self, ticker, side, qty, price, timestamp, otype):
-        self.ident = TransactionEvent.ident
-        TransactionEvent.ident += 1
+        super().__init__()
+
+        self.ident = Event.ident
+        Event.ident += 1
 
         self.side = side
         self.ticker = ticker
@@ -103,7 +128,6 @@ class TransactionEvent:
         self.timestamp = dtp.parse(timestamp)
         self.ties = []
         self.otype = otype
-        self.running = 0
 
     def __repr__(self):
         q = qty(self.qty)
@@ -180,8 +204,6 @@ class TransactionEvent:
 
         Different things, but the same underlying calculation.
         '''
-        if self.ident == 126:
-            print(self.qty - sum([tie.qty for tie in self.ties]))
         return self.qty - sum([tie.qty for tie in self.ties])
 
 class LotConnector:
@@ -191,7 +213,8 @@ class LotConnector:
         assert type(event) is TransactionEvent
 
         if event.side == 'buy':
-            stock.qty += event.qty
+            pass
+            #stock.qty += event.qty FIXME
         elif event.side == 'sell':
             qty = event.qty
             while qty > ZERO:
@@ -254,30 +277,26 @@ class StockFILO:
         return self.events[-1].timestamp
 
     @property
-    def value(self):
-        return sum([
-            e.price * e.unsettled
-            for e in self.transactions
-            if e.side == 'buy'
-        ])
-
-    @property
-    def average(self):
-        return self.value / self.qty if self.qty > 0 else 0
-
-    @property
     def transactions(self):
         return [e for e in self.events if type(e) is TransactionEvent]
 
     def __init__(self, account, ticker):
         self.account = account
         self.ticker = ticker
-        self.qty = 0
         self.pointer = 0
         self.events = []
         self.event_pool = sorted(
             [
                 StockSplitEvent(
+                    ticker=ticker,
+                    date='August 31, 2020',
+                    multiplier=4,
+                    divisor=1,
+                )
+            ] if ticker == 'AAPL' else [
+            ] + [
+                StockSplitEvent(
+                    ticker=ticker,
                     date=ss['execution_date'],
                     multiplier=ss['multiplier'],
                     divisor=ss['divisor'],
@@ -301,7 +320,7 @@ class StockFILO:
     def __repr__(self):
         return '<StockFILO:%-5s x%8.2f @ mean:%s>' % (
             self.ticker,
-            self.qty,
+            self.quantity,
             mulla(self.average),
         )
 
@@ -327,12 +346,24 @@ class StockFILO:
         return self.account.get_price(self.ticker)
 
     @property
-    def equity(self):
-        return self.qty * self.price
+    def average(self):
+        return self.cost / self.quantity if self.quantity > ZERO else 0
+
+    @property
+    def quantity(self):
+        return self.events[-1].running
 
     @property
     def cost(self):
-        return self.value
+        return sum([
+            e.price * e.unsettled
+            for e in self.transactions
+            if e.side == 'buy'
+        ])
+
+    @property
+    def equity(self):
+        return self.quantity * self.price
 
     @property
     def gain(self):
@@ -342,10 +373,10 @@ class StockFILO:
         print('#' * 80)
 
         for event in self.events:
-            if event.side == 'buy': continue
+            if type(event) is StockSplitEvent: continue
+            elif event.side == 'buy': continue
             elif event.side == 'sell':
                 # The buys
-                print('buys:', len(event.ties))
                 for tie in event.ties:
                     print(tie.bought)
 
@@ -355,11 +386,10 @@ class StockFILO:
 
         # Remaining buys (without a corresponding sell; current equity)
         for event in self.events[self.pointer:]:
-            if event.side == 'sell': continue
             print(event)
 
-        print("Cost : %s x %s = %s" % (qty(self.qty), mulla(self.average), mulla(self.cost)))
-        print("Value: %s x %s = %s" % (qty(self.qty), mulla(self.price), mulla(self.equity)))
+        print("Cost : %s x %s = %s" % (qty(self.quantity), mulla(self.average), mulla(self.cost)))
+        print("Value: %s x %s = %s" % (qty(self.quantity), mulla(self.price), mulla(self.equity)))
         print("Capital Gains: %s" % (mulla(self.gain)))
         print()
 
@@ -565,8 +595,6 @@ class Account:
 
     def slurp(self, ttl=300):
         for ticker, parameters in self.transactions():
-            if ticker in DEBUG:
-                print(ticker, parameters)
             self[ticker].push(*parameters)
 
         self.data = self.cached(3 * ttl, 'account', 'holdings')
@@ -614,7 +642,7 @@ class Account:
         dividends = defaultdict(list)
         for datum in self.cached(ttl, 'account', 'dividends'):
             uri = datum['instrument']
-            ticker = self.cached(ttl, 'stocks', 'instrument', uri, 'symbol')
+            ticker = self.cached(6*ttl, 'stocks', 'instrument', uri, 'symbol')
             instrument = self.cached(6*ttl, 'stocks', 'instrument', uri)
             dividends[ticker].append(datum)
         return dividends
@@ -649,7 +677,7 @@ class Account:
             ticker = option['chain_symbol']
 
             uri = option['option']
-            instrument = self.cached(3*ttl, 'stocks', 'instrument', uri)
+            instrument = self.cached(6*ttl, 'stocks', 'instrument', uri)
             if instrument['state'] == 'expired':
                 raise
             elif instrument['tradability'] == 'untradable':
@@ -692,7 +720,7 @@ class Account:
             premium = 0
             for leg in option['legs']:
                 uri = leg['option']
-                instrument = self.cached(900, 'stocks', 'instrument', uri)
+                instrument = self.cached(6*ttl, 'stocks', 'instrument', uri)
 
                 if ticker in DEBUG:
                     dprint(instrument, title=f'stocks:instrument({uri})')
@@ -723,10 +751,10 @@ class Account:
             for l in legs:
                 activities[ticker].append(' + l:%s' % l)
 
-        data = self.cached(600, 'orders', 'stocks:open')
+        data = self.cached(ttl, 'orders', 'stocks:open')
         for order in data:
             uri = order['instrument']
-            ticker = self.cached(1800, 'stocks', 'instrument', uri, 'symbol')
+            ticker = self.cached(6*ttl, 'stocks', 'instrument', uri, 'symbol')
             activities[ticker].append("%s %s x%s @%s" % (
                 order['type'],
                 order['side'],
