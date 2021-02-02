@@ -10,11 +10,13 @@ echo .venv > .gitignore
 
 pipx install virtualenv
 python3 -m venv --upgrade-deps --upgrade .venv
-
 python3 -m pip install --upgrade pip
+
 python3 -m pip install robin-stocks
 python3 -m pip install numpy
 python3 -m pip install python-dateutil
+python3 -m pip install polygon-api-client --include-deps
+python3 -m pip install iexfinance
 
 source .venv/bin/activate
 

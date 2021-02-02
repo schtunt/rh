@@ -7,13 +7,19 @@ import math, hashlib, random
 
 import pytz
 from datetime import datetime, timedelta, timezone
+import datetime as dt
 from collections import defaultdict, namedtuple
 from pathlib import Path
 
 import numpy as np
 import dateutil.parser as dtp
-import robin_stocks as rh
 from collections import defaultdict, Counter
+
+import robin_stocks as rh
+import iexfinance as iex
+import iexfinance.stocks as iex_stocks
+import polygon
+pg = None
 
 from pygments import highlight
 from pygments.lexers import PythonLexer
@@ -24,6 +30,12 @@ from pprint import pformat
 from beautifultable import BeautifulTable
 from colorama import init, Back, Fore
 from termcolor import colored
+
+
+
+def ts_to_datetime(ts) -> str:
+    return dt.fromtimestamp(ts / 1000.0).strftime('%Y-%m-%d %H:%M')
+
 
 def dump(heading, obj):
     return '%s\n%s' % (
@@ -287,17 +299,12 @@ class StockFILO:
             [
                 StockSplitEvent(
                     ticker=ticker,
-                    date='August 31, 2020',
-                    multiplier=4,
-                    divisor=1,
-                )
-            ] if ticker == 'AAPL' else [
-            ] + [
-                StockSplitEvent(
-                    ticker=ticker,
-                    date=ss['execution_date'],
-                    multiplier=ss['multiplier'],
-                    divisor=ss['divisor'],
+                    #date=ss['exDate'],
+                    #multiplier=ss.get('forfactor', 1),
+                    #divisor=ss.get('tofactor', ss['ratio']),
+                    date=ss['exDate'],
+                    divisor=ss['fromFactor'],
+                    multiplier=ss['toFactor'],
                 ) for ss in account.cached('stocks', 'splits', ticker)
             ] + [
                 TransactionEvent(
@@ -508,6 +515,8 @@ class OptionReader(CSVReader):
 class Account:
     def __init__(self):
         self.robinhood = None
+        self.polygon_api_key = None
+        self.iex_api_key = None
         self.connect()
 
         self.portfolio = {}
@@ -530,12 +539,20 @@ class Account:
         return connected
 
     def connect(self):
-        if self.robinhood is None:
-            with open(os.path.join(Path.home(), ".rhrc")) as fh:
-                username, password = fh.readline().split(',')
-                self.robinhood = rh.login(username.strip(), password.strip())
+        with open(os.path.join(Path.home(), ".rhrc")) as fh:
+            username, password, self.polygon_api_key, self.iex_api_key = [
+                token.strip() for token in fh.readline().split(',')
+            ]
 
-        return self.robinhood
+            if self.robinhood is None:
+                self.robinhood = rh.login(username, password)
+
+            os.environ['IEX_TOKEN'] = self.iex_api_key
+            os.environ['IEX_OUTPUT_FORMAT'] = 'json'
+
+    def ticker2id(self, ticker):
+        '''Map ticker to robinhood id'''
+        return self.cached('stocks', 'instruments', ticker, info='id')[0]
 
     def slurp(self):
         for ticker, parameters in self.transactions():
@@ -743,7 +760,24 @@ class Account:
             data = pickle.load(open(cachefile, 'rb'))
         else:
             endpoint = ROBIN_STOCKS_API[area][subarea]
-            data = endpoint.function(*args, **kwargs)
+
+            if type(endpoint) is PolygonEndpoint:
+                with polygon.RESTClient(self.polygon_api_key) as pg:
+                    fn = getattr(pg, endpoint.function)
+                    response = fn(*args, **kwargs)
+                    if response.status == 'OK':
+                        data = response.results
+                    else:
+                        raise
+            elif type(endpoint) is IEXFinanceEndpoint:
+                if area == 'stocks':
+                    fn = getattr(iex_stocks.Stock(args[0]), endpoint.function)
+                    data = fn(*args[1:], **kwargs)
+                else:
+                    raise
+            else:
+                data = endpoint.function(*args, **kwargs)
+
             arguments = [
                 ','.join(map(str, args)),
                 ','.join(['%s=%s' % (k, v) for k, v in kwargs]),
@@ -764,12 +798,12 @@ class Account:
         ])
         cachefile = Path(f'{CACHE_DIR}/{uniqname}.pkl')
 
-        data, age, fresh, now = {}, -1, False, datetime.now()
+        data, age, fresh, this_second = {}, -1, False, datetime.now()
         while not fresh:
             data = self._pickled(cachefile, area, subarea, *args, **kwargs)
 
             then = datetime.fromtimestamp(cachefile.lstat().st_mtime)
-            age = now - then
+            age = this_second - then
 
             jitter = 1 + random.random()
             fresh = (endpoint.ttl == -1) or age.total_seconds() < endpoint.ttl * jitter
@@ -778,8 +812,9 @@ class Account:
 
         return data
 
-
 RobinStocksEndpoint = namedtuple('RobinStocksEndpoint', ['ttl', 'function'])
+PolygonEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
+IEXFinanceEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
 ROBIN_STOCKS_API = {
     'profiles': {
         'account'     : RobinStocksEndpoint(3600, rh.profiles.load_account_profile),
@@ -798,7 +833,8 @@ ROBIN_STOCKS_API = {
         'news'        : RobinStocksEndpoint(3600, rh.stocks.get_news),
         'quotes'      : RobinStocksEndpoint(3600, rh.stocks.get_quotes),
         'ratings'     : RobinStocksEndpoint(3600, rh.stocks.get_ratings),
-        'splits'      : RobinStocksEndpoint(3600, rh.stocks.get_splits),
+       #'splits'      : PolygonEndpoint(-1, 'reference_stock_splits'),
+        'splits'      : IEXFinanceEndpoint(86400, 'get_splits'),
         'historicals' : RobinStocksEndpoint(3600, rh.stocks.get_stock_historicals),
     },
     'options': {
