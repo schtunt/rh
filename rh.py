@@ -569,9 +569,8 @@ class Account:
         costbasis = defaultdict(Counter)
         for ticker, stock in self.portfolio.items():
             costbasis[ticker].update({
-                '_cost': stock.cost,
-                '_equity': stock.equity,
-                '_gain': stock.gain,
+                'cost': stock.cost,
+                'cost_basis': stock.gain,
             })
             for trans in (t for t in stock.transactions if t.side == 'sell'):
                 costbasis[ticker].update({
@@ -902,7 +901,7 @@ VIEWS = {
         'columns': [
             'ticker',
             'price', 'quantity', 'equity', 'percentage',
-            '_equity', '_cost', '_gain',
+            'cost', 'cost_basis',
             'short', 'bucket', 'rank',
             'equity_change', 'percent_change',
             'today', 'day', 'year',
@@ -917,9 +916,7 @@ VIEWS = {
             'price',
             'quantity',
             'equity',
-            '_equity',
-            '_cost',
-            '_gain',
+            'cost', 'cost_basis',
             'st_cb_qty', 'st_cb_capgain',
             'lt_cb_qty', 'lt_cb_capgain',
             'premium_collected', 'dividends_collected',
@@ -1006,6 +1003,8 @@ def tabulize(ctx, view, reverse, limit):
         'st_cb_capgain': mulla,
         'lt_cb_qty': qty,
         'lt_cb_capgain': mulla,
+        'cost': mulla,
+        'cost_basis': mulla,
     }
 
     table = BeautifulTable(maxwidth=300)
