@@ -25,8 +25,6 @@ from beautifultable import BeautifulTable
 from colorama import init, Back, Fore
 from termcolor import colored
 
-CACHE_DIR='/tmp'
-
 def dump(heading, obj):
     return '%s\n%s' % (
         heading,
@@ -214,7 +212,7 @@ class LotConnector:
 
         if event.side == 'buy':
             pass
-            #stock.qty += event.qty FIXME
+            #stock.qty += event.qty FIXME?
         elif event.side == 'sell':
             qty = event.qty
             while qty > ZERO:
@@ -300,7 +298,7 @@ class StockFILO:
                     date=ss['execution_date'],
                     multiplier=ss['multiplier'],
                     divisor=ss['divisor'],
-                ) for ss in account.cached(2592000, 'stocks', 'splits', ticker)
+                ) for ss in account.cached('stocks', 'splits', ticker)
             ] + [
                 TransactionEvent(
                     self.ticker,
@@ -309,7 +307,7 @@ class StockFILO:
                     ec['price'],
                     se['updated_at'],
                     se['type'],
-                ) for se in account.cached(2592000, 'stocks', 'events', ticker)
+                ) for se in account.cached('stocks', 'events', ticker)
                     for ec in se['equity_components']
             ], key=lambda e: e.timestamp
         )
@@ -394,12 +392,12 @@ class StockFILO:
         print()
 
 
+CACHE_DIR='/tmp'
 class CSVReader:
     def __init__(self, account, importer):
         self.active = None
 
         account.cached(
-            604800 if importer == 'stock' else 900,
             'export', importer,
             CACHE_DIR, '%s/%s' % (CACHE_DIR, importer),
         )
@@ -508,60 +506,6 @@ class OptionReader(CSVReader):
 
 
 class Account:
-    # TODO: Move this and related functions to CLI code
-    functions = {
-        'profiles': {
-            'account'     : rh.profiles.load_account_profile,
-            'investment'  : rh.profiles.load_investment_profile,
-            'portfolio'   : rh.profiles.load_portfolio_profile,
-            'security'    : rh.profiles.load_security_profile,
-            'user'        : rh.profiles.load_user_profile,
-        },
-        'stocks': {
-            'earning'     : rh.stocks.get_earnings,
-            'events'      : rh.stocks.get_events,
-            'fundamentals': rh.stocks.get_fundamentals,
-            'instruments' : rh.stocks.get_instruments_by_symbols,
-            'instrument'  : rh.stocks.get_instrument_by_url,
-            'prices'      : rh.stocks.get_latest_price,
-            'news'        : rh.stocks.get_news,
-            'quotes'      : rh.stocks.get_quotes,
-            'ratings'     : rh.stocks.get_ratings,
-            'splits'      : rh.stocks.get_splits,
-            'historicals' : rh.stocks.get_stock_historicals,
-        },
-        'options': {
-            'positions:all'  : rh.options.get_all_option_positions,
-            'positions:open' : rh.options.get_open_option_positions,
-            'positions:agg'  : rh.options.get_aggregate_positions,
-            'chains'         : rh.options.get_chains,
-        },
-        'orders': {
-            'options:open'   : rh.orders.get_all_open_option_orders,
-            'options:all'    : rh.orders.get_all_option_orders,
-            'stocks:open'    : rh.orders.get_all_open_stock_orders,
-            'stocks:all'     : rh.orders.get_all_stock_orders,
-        },
-        'markets': {
-            'movers'         : rh.markets.get_top_movers,
-        },
-        'account': {
-            'notifications'  : rh.account.get_latest_notification,
-            'positions:all'  : rh.account.get_all_positions,
-            'positions:open' : rh.account.get_open_stock_positions,
-            'margin'         : rh.account.get_margin_interest,
-            'dividends:total': rh.account.get_total_dividends,
-            'dividends'      : rh.account.get_dividends,
-            'fees'           : rh.account.get_subscription_fees,
-            'phoenix'        : rh.account.load_phoenix_account,
-            'holdings'       : rh.account.build_holdings,
-        },
-        'export': {
-            'stock'          : rh.export_completed_stock_orders,
-            'option'         : rh.export_completed_option_orders,
-        },
-    }
-
     def __init__(self):
         self.robinhood = None
         self.connect()
@@ -593,11 +537,11 @@ class Account:
 
         return self.robinhood
 
-    def slurp(self, ttl=300):
+    def slurp(self):
         for ticker, parameters in self.transactions():
             self[ticker].push(*parameters)
 
-        self.data = self.cached(3 * ttl, 'account', 'holdings')
+        self.data = self.cached('account', 'holdings')
         self.tickers = sorted(self.data.keys())
 
         costbasis = self._get_costbasis()
@@ -638,46 +582,46 @@ class Account:
                 })
         return costbasis
 
-    def _get_dividends(self, ttl=300):
+    def _get_dividends(self):
         dividends = defaultdict(list)
-        for datum in self.cached(ttl, 'account', 'dividends'):
+        for datum in self.cached('account', 'dividends'):
             uri = datum['instrument']
-            ticker = self.cached(6*ttl, 'stocks', 'instrument', uri, 'symbol')
-            instrument = self.cached(6*ttl, 'stocks', 'instrument', uri)
+            ticker = self.cached('stocks', 'instrument', uri, 'symbol')
+            instrument = self.cached('stocks', 'instrument', uri)
             dividends[ticker].append(datum)
         return dividends
 
-    def _get_fundamentals(self, ttl=300):
+    def _get_fundamentals(self):
         return dict(
             zip(
                 self.tickers,
-                self.cached(ttl, 'stocks', 'fundamentals', self.tickers)
+                self.cached('stocks', 'fundamentals', self.tickers)
             )
         )
 
     def get_price(self, ticker):
         return self._get_prices().get(
             ticker,
-            flt(self.cached(5*300, 'stocks', 'prices', ticker)[0])
+            flt(self.cached('stocks', 'prices', ticker)[0])
         )
 
-    def _get_prices(self, ttl=300):
+    def _get_prices(self):
         return dict(
             zip(
                 self.tickers,
-                map(flt, self.cached(3 * ttl, 'stocks', 'prices', self.tickers))
+                map(flt, self.cached('stocks', 'prices', self.tickers))
             )
         )
 
-    def _get_positions(self, ttl=300):
-        data = self.cached(ttl, 'options', 'positions:all')
+    def _get_positions(self):
+        data = self.cached('options', 'positions:all')
 
         activities = defaultdict(list)
         for option in [o for o in data if flt(o['quantity']) != 0]:
             ticker = option['chain_symbol']
 
             uri = option['option']
-            instrument = self.cached(6*ttl, 'stocks', 'instrument', uri)
+            instrument = self.cached('stocks', 'instrument', uri)
             if instrument['state'] == 'expired':
                 raise
             elif instrument['tradability'] == 'untradable':
@@ -699,7 +643,7 @@ class Account:
             ))
 
         premiums = defaultdict(lambda: 0)
-        data = self.cached(6*ttl, 'orders', 'options:all')
+        data = self.cached('orders', 'options:all')
         for option in [o for o in data if o['state'] not in ('cancelled', 'expired')]:
             ticker = option['chain_symbol']
 
@@ -720,7 +664,7 @@ class Account:
             premium = 0
             for leg in option['legs']:
                 uri = leg['option']
-                instrument = self.cached(6*ttl, 'stocks', 'instrument', uri)
+                instrument = self.cached('stocks', 'instrument', uri)
 
                 if ticker in DEBUG:
                     dprint(instrument, title=f'stocks:instrument({uri})')
@@ -751,10 +695,10 @@ class Account:
             for l in legs:
                 activities[ticker].append(' + l:%s' % l)
 
-        data = self.cached(ttl, 'orders', 'stocks:open')
+        data = self.cached('orders', 'stocks:open')
         for order in data:
             uri = order['instrument']
-            ticker = self.cached(6*ttl, 'stocks', 'instrument', uri, 'symbol')
+            ticker = self.cached('stocks', 'instrument', uri, 'symbol')
             activities[ticker].append("%s %s x%s @%s" % (
                 order['type'],
                 order['side'],
@@ -789,7 +733,7 @@ class Account:
 
     @connected
     def _machine(self, area, subarea, *args):
-        return Account.functions[area][subarea](*args)
+        return ROBIN_STOCKS_API[area][subarea](*args)
 
     def human(self, area, subarea, *args):
         return dump(f'{area}:{subarea}', self._machine(area, subarea, *args))
@@ -799,7 +743,8 @@ class Account:
         if cachefile.exists():
             data = pickle.load(open(cachefile, 'rb'))
         else:
-            data = Account.functions[area][subarea](*args, **kwargs)
+            endpoint = ROBIN_STOCKS_API[area][subarea]
+            data = endpoint.function(*args, **kwargs)
             arguments = [
                 ','.join(map(str, args)),
                 ','.join(['%s=%s' % (k, v) for k, v in kwargs]),
@@ -811,7 +756,8 @@ class Account:
 
         return data
 
-    def cached(self, ttl, area, subarea, *args, **kwargs):
+    def cached(self, area, subarea, *args, **kwargs):
+        endpoint = ROBIN_STOCKS_API[area][subarea]
         uniqname = '-'.join([
             area,
             subarea,
@@ -826,18 +772,69 @@ class Account:
             then = datetime.fromtimestamp(cachefile.lstat().st_mtime)
             age = now - then
 
-            jitter = random.randint(0, +0.75 * ttl)
-            fresh = (ttl == -1) or age.total_seconds() < ttl + jitter
+            jitter = 1 + random.random()
+            fresh = (endpoint.ttl == -1) or age.total_seconds() < endpoint.ttl * jitter
             if not fresh:
                 cachefile.unlink()
 
         return data
 
 
-CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
+RobinStocksEndpoint = namedtuple('RobinStocksEndpoint', ['ttl', 'function'])
+ROBIN_STOCKS_API = {
+    'profiles': {
+        'account'     : RobinStocksEndpoint(3600, rh.profiles.load_account_profile),
+        'investment'  : RobinStocksEndpoint(3600, rh.profiles.load_investment_profile),
+        'portfolio'   : RobinStocksEndpoint(3600, rh.profiles.load_portfolio_profile),
+        'security'    : RobinStocksEndpoint(3600, rh.profiles.load_security_profile),
+        'user'        : RobinStocksEndpoint(3600, rh.profiles.load_user_profile),
+    },
+    'stocks': {
+        'earning'     : RobinStocksEndpoint(3600, rh.stocks.get_earnings),
+        'events'      : RobinStocksEndpoint(3600, rh.stocks.get_events),
+        'fundamentals': RobinStocksEndpoint(3600, rh.stocks.get_fundamentals),
+        'instruments' : RobinStocksEndpoint(3600, rh.stocks.get_instruments_by_symbols),
+        'instrument'  : RobinStocksEndpoint(3600, rh.stocks.get_instrument_by_url),
+        'prices'      : RobinStocksEndpoint(1800, rh.stocks.get_latest_price),
+        'news'        : RobinStocksEndpoint(3600, rh.stocks.get_news),
+        'quotes'      : RobinStocksEndpoint(3600, rh.stocks.get_quotes),
+        'ratings'     : RobinStocksEndpoint(3600, rh.stocks.get_ratings),
+        'splits'      : RobinStocksEndpoint(3600, rh.stocks.get_splits),
+        'historicals' : RobinStocksEndpoint(3600, rh.stocks.get_stock_historicals),
+    },
+    'options': {
+        'positions:all'  : RobinStocksEndpoint(300, rh.options.get_all_option_positions),
+        'positions:open' : RobinStocksEndpoint(300, rh.options.get_open_option_positions),
+        'positions:agg'  : RobinStocksEndpoint(300, rh.options.get_aggregate_positions),
+        'chains'         : RobinStocksEndpoint(300, rh.options.get_chains),
+    },
+    'orders': {
+        'options:open'   : RobinStocksEndpoint(300, rh.orders.get_all_open_option_orders),
+        'options:all'    : RobinStocksEndpoint(300, rh.orders.get_all_option_orders),
+        'stocks:open'    : RobinStocksEndpoint(300, rh.orders.get_all_open_stock_orders),
+        'stocks:all'     : RobinStocksEndpoint(300, rh.orders.get_all_stock_orders),
+    },
+    'markets': {
+        'movers'         : RobinStocksEndpoint(3600, rh.markets.get_top_movers),
+    },
+    'account': {
+        'notifications'  : RobinStocksEndpoint(3600, rh.account.get_latest_notification),
+        'positions:all'  : RobinStocksEndpoint(3600, rh.account.get_all_positions),
+        'positions:open' : RobinStocksEndpoint(3600, rh.account.get_open_stock_positions),
+        'margin'         : RobinStocksEndpoint(3600, rh.account.get_margin_interest),
+        'dividends:total': RobinStocksEndpoint(3600, rh.account.get_total_dividends),
+        'dividends'      : RobinStocksEndpoint(3600, rh.account.get_dividends),
+        'fees'           : RobinStocksEndpoint(3600, rh.account.get_subscription_fees),
+        'phoenix'        : RobinStocksEndpoint(3600, rh.account.load_phoenix_account),
+        'holdings'       : RobinStocksEndpoint(3600, rh.account.build_holdings),
+    },
+    'export': {
+        'stock'          : RobinStocksEndpoint(3*3600, rh.export_completed_stock_orders),
+        'option'         : RobinStocksEndpoint(3*3600, rh.export_completed_option_orders),
+    },
+}
 
 DEBUG = []
-
 def dprint(data, title=None):
     if len(DEBUG) == 0: return
 
@@ -852,9 +849,7 @@ def dprint(data, title=None):
         )
     )
 
-
 @click.group()
-#@click.option('--debug/--no-debug', default=None)
 @click.option('-D', '--debug-tickers',multiple=True,  default=None)
 @click.pass_context
 def cli(ctx, debug_tickers):
@@ -862,8 +857,10 @@ def cli(ctx, debug_tickers):
     DEBUG=debug_tickers
     ctx.ensure_object(dict)
 
+CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
+
 @cli.command(help='Stock Overview (raw API dumps)', context_settings=CONTEXT_SETTINGS)
-@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['stocks']))
+@click.option('-s', '--subarea', required=True, type=click.Choice(ROBIN_STOCKS_API['stocks']))
 @click.option('-t', '--ticker', required=True)
 @click.pass_context
 def stocks(ctx, subarea, ticker):
@@ -871,30 +868,29 @@ def stocks(ctx, subarea, ticker):
     print(account.human('stocks', subarea, ticker))
 
 @cli.command(help='Options Overviews (raw API dumps)')
-@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['options']))
+@click.option('-s', '--subarea', required=True, type=click.Choice(ROBIN_STOCKS_API['options']))
 @click.option('-t', '--ticker', required=False)
 @click.pass_context
 def options(ctx, subarea, ticker):
     account = ctx.obj['account']
     print(account.human('options', subarea, ticker))
 
-
 @cli.command(help='Overviews (raw API dumps)')
-@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['profiles']))
+@click.option('-s', '--subarea', required=True, type=click.Choice(ROBIN_STOCKS_API['profiles']))
 @click.pass_context
 def profiles(ctx, subarea):
     account = ctx.obj['account']
     print(account.human('profiles', subarea))
 
 @cli.command(help='Account Overviews (raw API dumps)')
-@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['account']))
+@click.option('-s', '--subarea', required=True, type=click.Choice(ROBIN_STOCKS_API['account']))
 @click.pass_context
 def account(ctx, subarea):
     account = ctx.obj['account']
     print(account.human('account', subarea))
 
 @cli.command(help='Market Overviews (raw API dumps)')
-@click.option('-s', '--subarea', required=True, type=click.Choice(Account.functions['markets']))
+@click.option('-s', '--subarea', required=True, type=click.Choice(ROBIN_STOCKS_API['markets']))
 @click.pass_context
 def markets(ctx, subarea):
     account = ctx.obj['account']
@@ -930,6 +926,7 @@ VIEWS = {
         ],
     },
 }
+
 @cli.command(help='Views')
 @click.option('-v', '--view', default='pie', type=click.Choice(VIEWS.keys()))
 @click.option('-r', '--reverse', default=False, is_flag=True, type=bool)
@@ -983,9 +980,9 @@ def tabulize(ctx, view, reverse, limit):
         ])
 
     #if DEBUG:
-    #    for o in [o for o in account.cached(3600, 'account', 'positions:all')]:
+    #    for o in [o for o in account.cached('account', 'positions:all')]:
     #        dprint(o, title='account:positions:all')
-    #    for o in [o for o in account.cached(3600, 'options', 'positions:agg')]:
+    #    for o in [o for o in account.cached('options', 'positions:agg')]:
     #        dprint(o, title='options.positions:agg')
 
     formats = {
@@ -1024,7 +1021,10 @@ def tabulize(ctx, view, reverse, limit):
 
     table.rows.sort(VIEWS[view]['sort_by'], reverse)
 
-    print(table.rows[:limit] if limit > -1 else table)
+    if DEBUG:
+        print(table.rows.filter(lambda row: row['ticker'] in DEBUG))
+    else:
+        print(table.rows[:limit] if limit > -1 else table)
 
 
 @cli.command(help='Account History')
