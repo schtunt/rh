@@ -2,3 +2,4 @@
 stocks.csv
 options.csv
 __pycache__
+.cached

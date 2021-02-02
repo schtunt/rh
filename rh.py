@@ -4,12 +4,14 @@ import os, sys, locale
 import csv, requests
 import click, pickle, json
 import math, hashlib, random
+from collections import defaultdict, namedtuple
 
 import pytz
 from datetime import datetime, timedelta, timezone
 import datetime as dt
-from collections import defaultdict, namedtuple
-from pathlib import Path
+
+import pathlib
+from pathlib import posixpath
 
 import numpy as np
 import dateutil.parser as dtp
@@ -30,7 +32,6 @@ from pprint import pformat
 from beautifultable import BeautifulTable
 from colorama import init, Back, Fore
 from termcolor import colored
-
 
 
 def ts_to_datetime(ts) -> str:
@@ -65,9 +66,20 @@ sgn = lambda n: -1 if n <= 0 else 1
 pct = lambda p: c('%0.2f%%', p, ['red', 'green', 'magenta'], [0, 70])
 qty = lambda q, dp=2: c(f'%0.{dp}f', q, ['yellow', 'cyan'], [0])
 
-fmt = lambda f, d: lambda k: f.get(k, str)(d.get(k, -1))
+fmt = lambda f, d: lambda k: f.get(k, str)(d.get(k, 'N/A'))
 
 now = lambda: pytz.UTC.localize(datetime.now())
+
+
+CACHE_DIR='/tmp'
+if len(sys.argv) > 0:
+    CACHE_DIR=posixpath.join(
+        posixpath.dirname(sys.argv[0]),
+        '.cached',
+    )
+    if not posixpath.exists(CACHE_DIR):
+        os.mkdir(CACHE_DIR)
+
 
 class Event:
     ident = 0
@@ -399,7 +411,6 @@ class StockFILO:
         print()
 
 
-CACHE_DIR='/tmp'
 class CSVReader:
     def __init__(self, account, importer):
         self.active = None
@@ -539,7 +550,7 @@ class Account:
         return connected
 
     def connect(self):
-        with open(os.path.join(Path.home(), ".rhrc")) as fh:
+        with open(os.path.join(pathlib.Path.home(), ".rhrc")) as fh:
             username, password, self.polygon_api_key, self.iex_api_key = [
                 token.strip() for token in fh.readline().split(',')
             ]
@@ -586,8 +597,12 @@ class Account:
         costbasis = defaultdict(Counter)
         for ticker, stock in self.portfolio.items():
             costbasis[ticker].update({
-                'cost': stock.cost,
-                'cost_basis': stock.gain,
+                'cost':           stock.cost,
+                'cost_basis':     stock.gain,
+                'st_cb_qty':      0,
+                'st_cb_capgain':  0,
+                'lt_cb_qty':      0,
+                'lt_cb_capgain':  0,
             })
             for trans in (t for t in stock.transactions if t.side == 'sell'):
                 costbasis[ticker].update({
@@ -670,11 +685,11 @@ class Account:
             strategies = []
             o, c = option['opening_strategy'], option['closing_strategy']
             if o:
-                t, i = o.split('_')
-                strategies.append('o[%s %s]' % (t, i))
+                tokens = o.split('_')
+                strategies.append('o[%s]' % ' '.join(tokens))
             if c:
-                t, i = c.split('_')
-                strategies.append('c[%s %s]' % (t, i))
+                tokens = c.split('_')
+                strategies.append('c[%s]' % ' '.join(tokens))
 
             legs = []
             premium = 0
@@ -796,7 +811,7 @@ class Account:
             subarea,
             hashlib.sha1(','.join(map(str, args)).encode()).hexdigest(),
         ])
-        cachefile = Path(f'{CACHE_DIR}/{uniqname}.pkl')
+        cachefile = pathlib.Path(f'{CACHE_DIR}/{uniqname}.pkl')
 
         data, age, fresh, this_second = {}, -1, False, datetime.now()
         while not fresh:
@@ -817,25 +832,25 @@ PolygonEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
 IEXFinanceEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
 ROBIN_STOCKS_API = {
     'profiles': {
-        'account'     : RobinStocksEndpoint(3600, rh.profiles.load_account_profile),
-        'investment'  : RobinStocksEndpoint(3600, rh.profiles.load_investment_profile),
-        'portfolio'   : RobinStocksEndpoint(3600, rh.profiles.load_portfolio_profile),
-        'security'    : RobinStocksEndpoint(3600, rh.profiles.load_security_profile),
-        'user'        : RobinStocksEndpoint(3600, rh.profiles.load_user_profile),
+        'account'     : RobinStocksEndpoint(7200, rh.profiles.load_account_profile),
+        'investment'  : RobinStocksEndpoint(7200, rh.profiles.load_investment_profile),
+        'portfolio'   : RobinStocksEndpoint(7200, rh.profiles.load_portfolio_profile),
+        'security'    : RobinStocksEndpoint(7200, rh.profiles.load_security_profile),
+        'user'        : RobinStocksEndpoint(7200, rh.profiles.load_user_profile),
     },
     'stocks': {
-        'earning'     : RobinStocksEndpoint(3600, rh.stocks.get_earnings),
-        'events'      : RobinStocksEndpoint(3600, rh.stocks.get_events),
-        'fundamentals': RobinStocksEndpoint(3600, rh.stocks.get_fundamentals),
-        'instruments' : RobinStocksEndpoint(3600, rh.stocks.get_instruments_by_symbols),
-        'instrument'  : RobinStocksEndpoint(3600, rh.stocks.get_instrument_by_url),
-        'prices'      : RobinStocksEndpoint(1800, rh.stocks.get_latest_price),
-        'news'        : RobinStocksEndpoint(3600, rh.stocks.get_news),
-        'quotes'      : RobinStocksEndpoint(3600, rh.stocks.get_quotes),
-        'ratings'     : RobinStocksEndpoint(3600, rh.stocks.get_ratings),
+        'earning'     : RobinStocksEndpoint(7200, rh.stocks.get_earnings),
+        'events'      : RobinStocksEndpoint(7200, rh.stocks.get_events),
+        'fundamentals': RobinStocksEndpoint(7200, rh.stocks.get_fundamentals),
+        'instruments' : RobinStocksEndpoint(7200, rh.stocks.get_instruments_by_symbols),
+        'instrument'  : RobinStocksEndpoint(7200, rh.stocks.get_instrument_by_url),
+        'prices'      : RobinStocksEndpoint(7200, rh.stocks.get_latest_price),
+        'news'        : RobinStocksEndpoint(7200, rh.stocks.get_news),
+        'quotes'      : RobinStocksEndpoint(7200, rh.stocks.get_quotes),
+        'ratings'     : RobinStocksEndpoint(7200, rh.stocks.get_ratings),
        #'splits'      : PolygonEndpoint(-1, 'reference_stock_splits'),
         'splits'      : IEXFinanceEndpoint(86400, 'get_splits'),
-        'historicals' : RobinStocksEndpoint(3600, rh.stocks.get_stock_historicals),
+        'historicals' : RobinStocksEndpoint(7200, rh.stocks.get_stock_historicals),
     },
     'options': {
         'positions:all'  : RobinStocksEndpoint(300, rh.options.get_all_option_positions),
