@@ -747,9 +747,12 @@ class Account:
         return dict(premiums=premiums, activities=activities)
 
     @connected
+    def tickers(self):
+        return (stock.ticker for stock in self.stockReader)
+
+    @connected
     def transactions(self):
-        for stock in self.stockReader:
-            yield stock.ticker, stock.parameters
+        return ((stock.ticker, stock.parameters) for stock in self.stockReader)
 
     @connected
     def _machine(self, area, subarea, *args):
@@ -839,6 +842,7 @@ ROBIN_STOCKS_API = {
         'ratings'     : RobinStocksEndpoint(7200, rh.stocks.get_ratings),
        #'splits'      : PolygonEndpoint(-1, 'reference_stock_splits'),
         'splits'      : IEXFinanceEndpoint(86400, 'get_splits'),
+        'yesterday'   : IEXFinanceEndpoint(21600, 'get_previous_day_prices'),
         'historicals' : RobinStocksEndpoint(7200, rh.stocks.get_stock_historicals),
     },
     'options': {
@@ -942,12 +946,25 @@ VIEWS = {
             'ticker',
             'price', 'quantity', 'equity', 'percentage',
             'cost', 'cost_basis',
-            'short', 'bucket', 'rank',
+            'short', 'bucket', 'rank', 'growth',
             'equity_change', 'percent_change',
-            'today', 'day', 'year',
+            'since_close', 'since_open',
             'premium_collected', 'dividends_collected',
             'activities',
-            'safe2trade'
+            'safe2trade',
+        ],
+    },
+    'active': {
+        'sort_by': 'ticker',
+        'filter_by': lambda d: len(d['activities']),
+        'columns': [
+            'ticker',
+            'price', 'quantity', 'equity', 'percentage',
+            'cost', 'cost_basis',
+            'growth',
+            'equity_change', 'percent_change',
+            'premium_collected', 'dividends_collected',
+            'activities',
         ],
     },
     'tax': {
@@ -989,16 +1006,27 @@ def tabulize(ctx, view, reverse, limit):
         ))
 
         p = datum['price']
-        l = flt(fundamentals[ticker]['low'])
-        h = flt(fundamentals[ticker]['high'])
-        datum['day'] = 100 * (p - l) / h
+
+        yesterday = account.cached('stocks', 'yesterday', ticker)
+        yesterchange = yesterday['marketChangeOverTime']
+
+        c = yesterday['close']
+        datum['since_close'] = 100 * (p - c) / c if c > 0 else 0
 
         o = flt(fundamentals[ticker]['open'])
-        datum['today'] = 100 * (p - o) / o
+        datum['since_open'] = 100 * (p - o) / o
 
-        l = flt(fundamentals[ticker]['low_52_weeks'])
-        h = flt(fundamentals[ticker]['high_52_weeks'])
-        datum['year'] = 100 * (p - l) / h
+        datum['growth'] = 100 * (
+            sum((
+                flt(datum['equity']),
+                flt(datum['dividends_collected']),
+                flt(datum['premium_collected']),
+            )) / flt(datum['cost']) - 1
+        )
+
+        #l = flt(fundamentals[ticker]['low_52_weeks'])
+        #h = flt(fundamentals[ticker]['high_52_weeks'])
+        #datum['year'] = 100 * (p - l) / h
 
         eq = flt(datum['equity'])
         datum['bucket'] = 0
@@ -1006,25 +1034,28 @@ def tabulize(ctx, view, reverse, limit):
         for i, b in enumerate([s * 1000 for s in buckets[1:]]):
             l, h = eq * 0.75, eq * 1.25
             if l < b < h:
+                if p < 25: round_to = 1
+                elif p < 100: round_to = 0.5
+                elif p < 1000: round_to = 0.2
+                else: round_to = .1
                 datum['bucket'] = b//1000
-                datum['short'] = rnd((eq - b) / datum['price'], 0.25)
+                datum['short'] = rnd((eq - b) / datum['price'], round_to)
                 break
 
-        # Rank = sum(
-        #     x for price down since open?
-        #     x for the horta; how short are you from reaching assigned bucket size
-        #     x for price as percentage from today's low to high
-        #     x for inverse of price as percentage from year's low to high
-        #     x for all-time percentage change (positive cost basis means more risk tolerance)
         magnify = lambda p, x: x*(p+(100/x))/200
         pctch = flt(datum['percent_change'])
         eq = flt(datum['equity'])
-        datum['rank'] = sum([
-            50 * (eq / (datum['bucket'] * 1000) if datum['bucket'] > 0 else 0),
-            30 * magnify(datum['today'], 4),  # is stock down since open?
-            15 * magnify(datum['day'], 4),    # is stock down compared to low/high points, today?
-             5 * (pctch / 100)
-        ])
+        scores = {
+            'bucket':           (25, (eq / (datum['bucket'] * 1000)) if datum['bucket'] > 0 else 1),
+            'yesterchange':     (25, magnify(yesterchange, 4)),
+            'since_close':      (20, magnify(datum['since_close'], 4)),
+            'since_open':       (15, magnify(datum['since_open'], 4)),
+            'growth':           (10, magnify(-min(100, datum['growth']), 1)),
+            'portfolio_weight': ( 5, (pctch / 100)),
+        }
+        if ticker in DEBUG:
+            print(dump('scores', scores))
+        datum['rank'] = sum([pct * min(100, score) for (pct, score) in scores.values()])
 
     #if DEBUG:
     #    for o in [o for o in account.cached('account', 'positions:all')]:
@@ -1034,9 +1065,8 @@ def tabulize(ctx, view, reverse, limit):
 
     formats = {
         'bucket': lambda b: colored('$%dk' % b, 'blue'),
-        'today': pct,
-        'day': pct,
-        'year': pct,
+        'since_open': pct,
+        'since_close': pct,
         'price': mulla,
         'quantity': qty,
         'average_buy_price': mulla,
@@ -1049,6 +1079,7 @@ def tabulize(ctx, view, reverse, limit):
         'delta': qty,
         'premium_collected': mulla,
         'dividends_collected': mulla,
+        'growth': pct,
         'st_cb_qty': qty,
         'st_cb_capgain': mulla,
         'lt_cb_qty': qty,
@@ -1068,7 +1099,15 @@ def tabulize(ctx, view, reverse, limit):
         f = fmt(formats, datum)
         table.rows.append([f(h) for h in VIEWS[view]['columns']])
 
-    table.rows.sort(VIEWS[view]['sort_by'], reverse)
+    sort_by, filter_by = (
+        VIEWS[view].get('sort_by', 'ticker'),
+        VIEWS[view].get('filter_by', None)
+    )
+
+    if filter_by is not None:
+        table = table.rows.filter(filter_by)
+
+    table.rows.sort(sort_by, reverse)
 
     if DEBUG:
         print(table.rows.filter(lambda row: row['ticker'] in DEBUG))
@@ -1089,3 +1128,20 @@ if __name__ == '__main__':
     locale.setlocale(locale.LC_ALL, '')
     rh.helper.set_output(open(os.devnull,"w"))
     cli(obj={'account': Account()})
+else:
+    locale.setlocale(locale.LC_ALL, '')
+    rh.helper.set_output(open(os.devnull,"w"))
+
+    print("Running in interactive mode")
+
+    module = sys.modules[__name__]
+    acc = Account()
+    acc.slurp()
+    glb = globals()
+    lcl = locals()
+    for ticker in acc.tickers:
+        key, value = ticker.lower(), iex_stocks.Stock(ticker)
+        setattr(module, key, value)
+
+
+
