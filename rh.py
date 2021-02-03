@@ -21,7 +21,6 @@ import robin_stocks as rh
 import iexfinance as iex
 import iexfinance.stocks as iex_stocks
 import polygon
-pg = None
 
 from pygments import highlight
 from pygments.lexers import PythonLexer
@@ -36,7 +35,6 @@ from termcolor import colored
 
 def ts_to_datetime(ts) -> str:
     return dt.fromtimestamp(ts / 1000.0).strftime('%Y-%m-%d %H:%M')
-
 
 def dump(heading, obj):
     return '%s\n%s' % (
@@ -64,7 +62,10 @@ rnd = lambda a, r: round(a / r) * r
 sgn = lambda n: -1 if n <= 0 else 1
 
 pct = lambda p: c('%0.2f%%', p, ['red', 'green', 'magenta'], [0, 70])
+mpct = lambda p: pct(100*p)
 qty = lambda q, dp=2: c(f'%0.{dp}f', q, ['yellow', 'cyan'], [0])
+qty0 = lambda q: qty(q, 0)
+qty1 = lambda q: qty(q, 1)
 
 fmt = lambda f, d: lambda k: f.get(k, str)(d.get(k, 'N/A'))
 
@@ -1011,12 +1012,12 @@ def tabulize(ctx, view, reverse, limit):
         yesterchange = yesterday['marketChangeOverTime']
 
         c = yesterday['close']
-        datum['since_close'] = 100 * (p - c) / c if c > 0 else 0
+        datum['since_close'] = (p - c) / c if c > 0 else 0
 
         o = flt(fundamentals[ticker]['open'])
-        datum['since_open'] = 100 * (p - o) / o
+        datum['since_open'] = (p - o) / o
 
-        datum['growth'] = 100 * (
+        datum['growth'] = (
             sum((
                 flt(datum['equity']),
                 flt(datum['dividends_collected']),
@@ -1031,8 +1032,9 @@ def tabulize(ctx, view, reverse, limit):
         eq = flt(datum['equity'])
         datum['bucket'] = 0
         datum['short'] = 0
+        distance = 0.1
         for i, b in enumerate([s * 1000 for s in buckets[1:]]):
-            l, h = eq * 0.75, eq * 1.25
+            l, h = eq*(1-distance), eq*(1+distance)
             if l < b < h:
                 if p < 25: round_to = 1
                 elif p < 100: round_to = 0.5
@@ -1042,16 +1044,18 @@ def tabulize(ctx, view, reverse, limit):
                 datum['short'] = rnd((eq - b) / datum['price'], round_to)
                 break
 
-        magnify = lambda p, x: x*(p+(100/x))/200
-        pctch = flt(datum['percent_change'])
+        # Maps [-100/x .. +100/x] to [0 .. 100]
+        normalize = lambda p, x: (p*x+1)/2
+
+        totalchange = flt(datum['percent_change'])/100
         eq = flt(datum['equity'])
         scores = {
-            'bucket':           (25, (eq / (datum['bucket'] * 1000)) if datum['bucket'] > 0 else 1),
-            'yesterchange':     (25, magnify(yesterchange, 4)),
-            'since_close':      (20, magnify(datum['since_close'], 4)),
-            'since_open':       (15, magnify(datum['since_open'], 4)),
-            'growth':           (10, magnify(-min(100, datum['growth']), 1)),
-            'portfolio_weight': ( 5, (pctch / 100)),
+            'yesterchange':     (25, normalize(yesterchange, 4)),
+            'since_close':      (25, normalize(datum['since_close'], 4)),
+            'since_open':       (15, normalize(datum['since_open'], 4)),
+            'bucket':           (15, normalize((eq/1000 - datum['bucket'])/13, 1) if datum['bucket'] > 0 else 1),
+            'totalchange':      (10, normalize(-totalchange, 0.25)),
+            'growth':           (10, normalize(datum['growth'], 1)),
         }
         if ticker in DEBUG:
             print(dump('scores', scores))
@@ -1065,10 +1069,10 @@ def tabulize(ctx, view, reverse, limit):
 
     formats = {
         'bucket': lambda b: colored('$%dk' % b, 'blue'),
-        'since_open': pct,
-        'since_close': pct,
+        'since_open': mpct,
+        'since_close': mpct,
         'price': mulla,
-        'quantity': qty,
+        'quantity': qty0,
         'average_buy_price': mulla,
         'equity': mulla,
         'percent_change': pct,
@@ -1077,9 +1081,10 @@ def tabulize(ctx, view, reverse, limit):
         'percentage': pct,
         'rank': int,
         'delta': qty,
+        'short': qty1,
         'premium_collected': mulla,
         'dividends_collected': mulla,
-        'growth': pct,
+        'growth': mpct,
         'st_cb_qty': qty,
         'st_cb_capgain': mulla,
         'lt_cb_qty': qty,
