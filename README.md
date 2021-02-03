@@ -10,7 +10,7 @@ echo .venv > .gitignore
 
 pipx install virtualenv
 python3 -m venv --upgrade-deps --upgrade .venv
-python3 -m pip install --upgrade pip
+python3 -m pip install --upgrade pip pipreqs
 
 python3 -m pip install robin-stocks
 python3 -m pip install numpy
@@ -21,6 +21,9 @@ python3 -m pip install iexfinance
 source .venv/bin/activate
 
 deactivate
+
+#pipreqs --encoding=iso-8859-1
+
 ```
 # DEMO
 

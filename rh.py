@@ -233,16 +233,11 @@ class LotConnector:
         event = stock.events[-1]
         assert type(event) is TransactionEvent
 
-        if event.side == 'buy':
-            pass
-            #stock.qty += event.qty FIXME?
-        elif event.side == 'sell':
+        if event.side == 'sell':
             qty = event.qty
             while qty > ZERO:
-                a = stock.pointer < len(stock.events)
-                if a:
-                    b = type(stock.events[stock.pointer]) is StockSplitEvent
-                    if b:
+                if stock.pointer < len(stock.events):
+                    if  type(stock.events[stock.pointer]) is StockSplitEvent:
                         stock.pointer += 1
                     else:
                         c = stock.events[stock.pointer].side == 'sell'
@@ -306,6 +301,21 @@ class StockFILO:
     @property
     def transactions(self):
         return [e for e in self.events if type(e) is TransactionEvent]
+
+    @property
+    def subject2washsale(self):
+        thirty = timedelta(days=30, seconds=0)
+        current = self.transactions[-1]
+        if (now() - current.timestamp) > thirty:
+            if len(self.transactions) > 1:
+                last = self.transactions[-2]
+                current = self.transactions[-1]
+                if (current.timestamp - last.timestamp) > thirty:
+                    return False
+            else:
+                return False
+
+        return True
 
     def __init__(self, account, ticker):
         self.account = account
@@ -741,24 +751,6 @@ class Account:
         for stock in self.stockReader:
             yield stock.ticker, stock.parameters
 
-    def xxxxxxx(self):
-        stock, option = next(self.stockReader), next(self.optionReader)
-
-        ticker, parameters = None, None
-        while True:
-            if stock and (not option or stock.timestamp < option.timestamp):
-                parameters = stock.parameters
-                ticker = stock.ticker
-                stock = next(self.stockReader)
-            elif option and (not stock or stock.timestamp >= option.timestamp):
-                parameters = option.parameters
-                ticker = option.ticker
-                option = next(self.optionReader)
-            else:
-                break
-
-            yield ticker, parameters
-
     @connected
     def _machine(self, area, subarea, *args):
         return ROBIN_STOCKS_API[area][subarea](*args)
@@ -955,6 +947,7 @@ VIEWS = {
             'today', 'day', 'year',
             'premium_collected', 'dividends_collected',
             'activities',
+            'safe2trade'
         ],
     },
     'tax': {
@@ -986,6 +979,15 @@ def tabulize(ctx, view, reverse, limit):
 
     fundamentals = account._get_fundamentals()
     for ticker, datum in account.data.items():
+        fifo = account[ticker]
+        index = fifo.pointer
+        buy = fifo[index]
+        assert buy.side == 'buy'
+        datum['safe2trade'] = ' '.join((
+            colored('ST!', 'red') if buy.term == 'st' else colored('lt', 'blue'),
+            colored('WS!', 'red') if fifo.subject2washsale else colored('wsx', 'blue'),
+        ))
+
         p = datum['price']
         l = flt(fundamentals[ticker]['low'])
         h = flt(fundamentals[ticker]['high'])
