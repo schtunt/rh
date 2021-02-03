@@ -155,11 +155,8 @@ class TransactionEvent(Event):
 
     def __repr__(self):
         q = qty(self.qty)
-        if len(self.ties) > 0:
-            q = '%s (%s)' % (
-                q,
-                '+'.join([qty(tie.qty) for tie in self.ties])
-            )
+        if len(self.ties) > 1:
+            q = '%s (%s)' % (q, ', '.join([tie.portion(self) for tie in self.ties]))
 
         rstr = '#%05d %s %s %s %s (cg=%s): %s x %s = %s @ %s' % (
             self.ident,
@@ -295,6 +292,12 @@ class LotConnector:
             self.bought,
         )
 
+    def portion(self, caller):
+        simple = caller.side == 'buy' or self.qty == self.bought.qty
+        return qty(self.qty) if simple else '%s of %s' % (
+            qty(self.qty), qty(self.bought.qty)
+        )
+
 class StockFILO:
     @property
     def timestamp(self):
@@ -392,7 +395,7 @@ class StockFILO:
                     print(tie.bought)
 
                 # The sell
-                print(event)
+                print('(%s)' % event)
                 print()
 
         # Remaining buys (without a corresponding sell; current equity)
