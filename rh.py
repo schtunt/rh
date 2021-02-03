@@ -293,7 +293,7 @@ class LotConnector:
             qty(self.qty), qty(self.bought.qty)
         )
 
-class StockFILO:
+class StockFIFO:
     @property
     def timestamp(self):
         return self.events[-1].timestamp
@@ -350,7 +350,7 @@ class StockFILO:
         return self.events[i]
 
     def __repr__(self):
-        return '<StockFILO:%-5s x%8.2f @ mean:%s>' % (
+        return '<StockFIFO:%-5s x%8.2f @ mean:%s>' % (
             self.ticker,
             self.quantity,
             mulla(self.average),
@@ -545,7 +545,7 @@ class Account:
 
     def __getitem__(self, ticker):
         if ticker not in self.portfolio:
-            self.portfolio[ticker] = StockFILO(self, ticker)
+            self.portfolio[ticker] = StockFIFO(self, ticker)
 
         return self.portfolio[ticker]
 
