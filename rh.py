@@ -57,17 +57,23 @@ def mulla(m):
 
 ZERO = 1e-5
 
-flt = np.single
-rnd = lambda a, r: round(a / r) * r
-sgn = lambda n: -1 if n <= 0 else 1
+flt  = np.single
+rnd  = lambda a, r: round(a / r) * r
+sgn  = lambda n: -1 if n <= 0 else 1
 
-pct = lambda p: c('%0.2f%%', p, ['red', 'green', 'magenta'], [0, 70])
+pct  = lambda p: c('%0.2f%%', p, ['red', 'green', 'magenta'], [0, 70])
 mpct = lambda p: pct(100*p)
-qty = lambda q, dp=2: c(f'%0.{dp}f', q, ['yellow', 'cyan'], [0])
+qty  = lambda q, dp=2: c(f'%0.{dp}f', q, ['yellow', 'cyan'], [0])
 qty0 = lambda q: qty(q, 0)
 qty1 = lambda q: qty(q, 1)
 
-fmt = lambda f, d: lambda k: f.get(k, str)(d.get(k, 'N/A'))
+def fmt(f, d):
+    def fn(k):
+        try:
+            return f.get(k, str)(d.get(k, 'N/A'))
+        except:
+            raise RuntimeError(f'Invalid parameters for fmt; d={d.get(k, "N/A")}, k={k})')
+    return fn
 
 now = lambda: pytz.UTC.localize(datetime.now())
 
@@ -420,14 +426,14 @@ class StockFIFO:
 
 
 class CSVReader:
-    def __init__(self, account, importer):
+    def __init__(self, account, context):
         self.active = None
 
         account.cached(
-            'export', importer,
-            CACHE_DIR, '%s/%s' % (CACHE_DIR, importer),
+            'export', context,
+            CACHE_DIR, '%s/%s' % (CACHE_DIR, context),
         )
-        self.cachefile = os.path.join(CACHE_DIR, '%s.csv' % importer)
+        self.cachefile = os.path.join(CACHE_DIR, '%s.csv' % context)
         with open(self.cachefile, newline='') as fh:
             reader = csv.reader(fh, delimiter=',', quotechar='"')
             self.header = next(reader)
@@ -466,8 +472,9 @@ class CSVReader:
 
 
 class StockReader(CSVReader):
-    def __init__(self, account, importer='stock'):
-        super().__init__(account, importer)
+    def __init__(self, account, mocked=False):
+        context = 'stock' if mocked is False else 'test'
+        super().__init__(account, context)
         self._ticker_field = 'symbol'
 
     @property
@@ -489,66 +496,70 @@ class StockReader(CSVReader):
         )
 
 
-class OptionReader(CSVReader):
-    def __init__(self, account, importer='option'):
-        super().__init__(account, importer)
-        self._ticker_field = 'chain_symbol'
-
-    @property
-    def timestamp(self):
-        return dtp.parse('%sT15:00:00.000000Z' % self.get('expiration_date'))
-
-    @property
-    def side(self):
-        side, otype = self.get('side'), self.get('option_type')
-
-        if (side, otype) == ('sell', 'call'):
-            side = 'sell'
-        elif (side, otype) == ('sell', 'put'):
-            side = 'buy'
-        elif (side, otype) == ('buy', 'call'):
-            side = 'buy'
-        elif (side, otype) == ('buy', 'put'):
-            side = 'sell'
-        else:
-            raise NotImplementedError
-
-        return side
-
-    @property
-    def otype(self):
-        return self.get('option_type')
-
-    @property
-    def parameters(self):
-        return (
-            100 * flt(self.get('processed_quantity')),
-            flt(self.get('strike_price')),
-            self.side,
-            self.timestamp,
-            '%s %s' % (self.side, self.otype,)
-        )
+#class OptionReader(CSVReader):
+#    def __init__(self, account, importer='option'):
+#        super().__init__(account, importer)
+#        self._ticker_field = 'chain_symbol'
+#
+#    @property
+#    def timestamp(self):
+#        return dtp.parse('%sT15:00:00.000000Z' % self.get('expiration_date'))
+#
+#    @property
+#    def side(self):
+#        side, otype = self.get('side'), self.get('option_type')
+#
+#        if (side, otype) == ('sell', 'call'):
+#            side = 'sell'
+#        elif (side, otype) == ('sell', 'put'):
+#            side = 'buy'
+#        elif (side, otype) == ('buy', 'call'):
+#            side = 'buy'
+#        elif (side, otype) == ('buy', 'put'):
+#            side = 'sell'
+#        else:
+#            raise NotImplementedError
+#
+#        return side
+#
+#    @property
+#    def otype(self):
+#        return self.get('option_type')
+#
+#    @property
+#    def parameters(self):
+#        return (
+#            100 * flt(self.get('processed_quantity')),
+#            flt(self.get('strike_price')),
+#            self.side,
+#            self.timestamp,
+#            '%s %s' % (self.side, self.otype,)
+#        )
 
 
 class Account:
-    def __init__(self):
+    def __init__(self, mocked=False):
         self.robinhood = None
         self.polygon_api_key = None
         self.iex_api_key = None
         self.connect()
 
-        self.portfolio = {}
+        self._portfolio = {}
         self.tickers = None
-        self.stockReader = StockReader(self)
-        self.optionReader = OptionReader(self)
+        self.stockReader = StockReader(self, mocked)
+        #self.optionReader = OptionReader(self)
 
         self.data = None
 
-    def __getitem__(self, ticker):
-        if ticker not in self.portfolio:
-            self.portfolio[ticker] = StockFIFO(self, ticker)
+    def get_stock(self, ticker):
+        if ticker not in self._portfolio:
+            self._portfolio[ticker] = StockFIFO(self, ticker)
 
-        return self.portfolio[ticker]
+        return self._portfolio[ticker]
+
+    @property
+    def stocks(self):
+        return self._portfolio
 
     def connected(fn):
         def connected(self, *args, **kwargs):
@@ -575,7 +586,8 @@ class Account:
     def slurp(self):
         for ticker, parameters in self.transactions():
             transaction = TransactionEvent(ticker, *parameters)
-            self[transaction.ticker].push(transaction)
+            stock = self.get_stock(transaction.ticker)
+            stock.push(transaction)
 
         self.data = self.cached('account', 'holdings')
         self.tickers = sorted(self.data.keys())
@@ -603,7 +615,7 @@ class Account:
     def _get_costbasis(self):
         #TODO: Add realized as well as unrealized for this data
         costbasis = defaultdict(Counter)
-        for ticker, stock in self.portfolio.items():
+        for ticker, stock in self.stocks.items():
             costbasis[ticker].update({
                 'cost':           stock.cost,
                 'cost_basis':     stock.gain,
@@ -944,26 +956,25 @@ VIEWS = {
     'pie': {
         'sort_by': 'rank',
         'columns': [
-            'ticker',
-            'price', 'quantity', 'equity', 'percentage',
-            'cost', 'cost_basis',
-            'short', 'bucket', 'rank', 'growth',
+            'ticker', 'percentage',
+            'price', 'quantity',
+            'cost', 'equity',
             'equity_change', 'percent_change',
-            'since_close', 'since_open',
+            'cost_basis', 'growth',
             'premium_collected', 'dividends_collected',
+            'short', 'bucket', 'rank', 'since_close', 'since_open', 'safe2trade',
             'activities',
-            'safe2trade',
         ],
     },
     'active': {
         'sort_by': 'ticker',
         'filter_by': lambda d: len(d['activities']),
         'columns': [
-            'ticker',
-            'price', 'quantity', 'equity', 'percentage',
-            'cost', 'cost_basis',
-            'growth',
+            'ticker', 'percentage',
+            'price', 'quantity',
+            'cost', 'equity',
             'equity_change', 'percent_change',
+            'cost_basis', 'growth',
             'premium_collected', 'dividends_collected',
             'activities',
         ],
@@ -972,10 +983,9 @@ VIEWS = {
         'sort_by': 'ticker',
         'columns': [
             'ticker',
-            'price',
-            'quantity',
-            'equity',
-            'cost', 'cost_basis',
+            'price', 'quantity',
+            'cost', 'equity',
+            'cost_basis',
             'st_cb_qty', 'st_cb_capgain',
             'lt_cb_qty', 'lt_cb_capgain',
             'premium_collected', 'dividends_collected',
@@ -997,7 +1007,7 @@ def tabulize(ctx, view, reverse, limit):
 
     fundamentals = account._get_fundamentals()
     for ticker, datum in account.data.items():
-        fifo = account[ticker]
+        fifo = account.get_stock(ticker)
         index = fifo.pointer
         buy = fifo[index]
         assert buy.side == 'buy'
@@ -1125,28 +1135,30 @@ def tabulize(ctx, view, reverse, limit):
 def history(ctx):
     account = ctx.obj['account']
     account.slurp()
-    for ticker, stock in account.portfolio.items():
+    for ticker, stock in account.stocks.items():
         if len(DEBUG) > 0 and ticker not in DEBUG: continue
         stock.summarize()
 
-if __name__ == '__main__':
-    locale.setlocale(locale.LC_ALL, '')
-    rh.helper.set_output(open(os.devnull,"w"))
-    cli(obj={'account': Account()})
-else:
+def preinitialize():
     locale.setlocale(locale.LC_ALL, '')
     rh.helper.set_output(open(os.devnull,"w"))
 
+if __name__ == '__main__':
+    preinitialize()
+    cli(obj={'account': Account()})
+
+acc = None
+def interactive():
     print("Running in interactive mode")
+    preinitialize()
 
     module = sys.modules[__name__]
+    global acc
     acc = Account()
     acc.slurp()
+
     glb = globals()
     lcl = locals()
     for ticker in acc.tickers:
         key, value = ticker.lower(), iex_stocks.Stock(ticker)
         setattr(module, key, value)
-
-
-
