@@ -18,8 +18,8 @@ import dateutil.parser as dtp
 from collections import defaultdict, Counter
 
 import robin_stocks as rh
-import iexfinance as iex
-import iexfinance.stocks as iex_stocks
+import yahoo_earnings_calendar as yec
+import iexfinance.stocks as iex
 import polygon
 
 from pygments import highlight
@@ -32,9 +32,10 @@ from beautifultable import BeautifulTable
 from colorama import init, Back, Fore
 from termcolor import colored
 
+import __main__
 
 def ts_to_datetime(ts) -> str:
-    return dt.fromtimestamp(ts / 1000.0).strftime('%Y-%m-%d %H:%M')
+    return datetime.fromtimestamp(ts / 1000.0).strftime('%Y-%m-%d %H:%M')
 
 def dump(heading, obj):
     return '%s\n%s' % (
@@ -157,7 +158,6 @@ class TransactionEvent(Event):
         self.ident = Event.ident
         Event.ident += 1
 
-        print(self.ident, qty)
         self.side = side
         self.qty = flt(qty)
         self.price = flt(price)
@@ -257,18 +257,20 @@ class LotConnector:
                 qty -= l.qty
 
     def __init__(self, sold, stock, wtf=False):
-        print('searching for boughts to satisfy the sold...')
-
         self.sold, self.bought, e = sold, None, None
         while self.bought is None:
             e = stock.events[stock.pointer]
-
             if type(e) is TransactionEvent and all((
                 e.side == 'buy', e.unsettled > ZERO
             )): self.bought = e
-            elif stock.pointer == len(stock.events):
-                stock.events.append(
-                    TransactionEvent(
+            else:
+                # The last sale completely depleted the last stock, so need
+                # to increment the pointer.
+                stock.pointer += 1
+
+                # Bad data from robinhood; workaround
+                if stock.pointer == len(stock.events):
+                    e = TransactionEvent(
                         stock.ticker,
                         sold.unsettled,
                         0.00,
@@ -276,27 +278,30 @@ class LotConnector:
                         str(datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc)),
                         'FREE',
                     )
-                )
-                self.bought = e
-            else:
-                # The last sale completely depleted the last stock, so need
-                # to increment the pointer.
-                stock.pointer += 1
+                    stock.events.append(e)
+                    self.bought = e
 
+        # we either depleted the buy, or the sell, whichever comes first. if
+        # the sell is depleted, that means the caller is done, else, the caller
+        # will call this constructor again with the next buy, until the sell
+        # is satisfied
         self.qty = min((self.sold.unsettled, self.bought.unsettled))
-        self.term = 'st' if (
-            (self.sold.timestamp - self.bought.timestamp) <= timedelta(days=365, seconds=0)
-        ) else 'lt'
+
+        # short-term or long-term sale (was the buy held over a year)
+        delta = (self.sold.timestamp - self.bought.timestamp)
+        self.term = 'st' if delta <= timedelta(days=365, seconds=0) else 'lt'
+
+        # finally, the aim of this object: to connect the sell to the corresponding buy
         self.sold.tie(self)
         self.bought.tie(self)
 
-    #def __repr__(self):
-    #    return '%s <--(x%0.5f:%s)--> %s' % (
-    #        self.sold,
-    #        self.portion,
-    #        self.term,
-    #        self.bought,
-    #    )
+    def __repr__(self):
+        return '%s <--(x%0.5f:%s)--> %s' % (
+            self.sold,
+            self.portion,
+            self.term,
+            self.bought,
+        )
 
     def portion(self, caller):
         simple = caller.side == 'buy' or self.qty == self.bought.qty
@@ -380,9 +385,6 @@ class StockFIFO:
             e = self.event_pool.pop(0)
             self.events.append(e)
             e.settle(self)
-
-        [print(e.timestamp) for e in self.events]
-        [print(e.timestamp) for e in sorted(self.events, key=lambda e: e.timestamp)]
 
     @property
     def price(self):
@@ -558,6 +560,8 @@ class StockReader(CSVReader):
 class Account:
     def __init__(self, mocked=False):
         self.robinhood = None
+        self.yec = None
+
         self.polygon_api_key = None
         self.iex_api_key = None
         self.connect()
@@ -586,6 +590,8 @@ class Account:
         return connected
 
     def connect(self):
+        self.yec = yec.YahooEarningsCalendar()
+
         with open(os.path.join(pathlib.Path.home(), ".rhrc")) as fh:
             username, password, self.polygon_api_key, self.iex_api_key = [
                 token.strip() for token in fh.readline().split(',')
@@ -809,8 +815,14 @@ class Account:
                         raise
             elif type(endpoint) is IEXFinanceEndpoint:
                 if area == 'stocks':
-                    fn = getattr(iex_stocks.Stock(args[0]), endpoint.function)
+                    fn = getattr(iex.Stock(args[0]), endpoint.function)
                     data = fn(*args[1:], **kwargs)
+                else:
+                    raise
+            elif type(endpoint) is YahooEarningsCalendarEndpoint:
+                if area == 'events' and subarea == 'earnings':
+                    fn = getattr(self.yec, endpoint.function)
+                    data = datetime.fromtimestamp(fn(args[0]))
                 else:
                     raise
             else:
@@ -853,6 +865,8 @@ class Account:
 RobinStocksEndpoint = namedtuple('RobinStocksEndpoint', ['ttl', 'function'])
 PolygonEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
 IEXFinanceEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
+YahooEarningsCalendarEndpoint = namedtuple('YahooEarningsCalendarEndpoint', ['ttl', 'function'])
+
 ROBIN_STOCKS_API = {
     'profiles': {
         'account'     : RobinStocksEndpoint(7200, rh.profiles.load_account_profile),
@@ -891,6 +905,9 @@ ROBIN_STOCKS_API = {
     },
     'markets': {
         'movers'         : RobinStocksEndpoint(3600, rh.markets.get_top_movers),
+    },
+    'events': {
+        'earnings'       : YahooEarningsCalendarEndpoint(86400, 'get_next_earnings_date'),
     },
     'account': {
         'notifications'  : RobinStocksEndpoint(3600, rh.account.get_latest_notification),
@@ -1162,22 +1179,20 @@ def preinitialize():
     locale.setlocale(locale.LC_ALL, '')
     rh.helper.set_output(open(os.devnull,"w"))
 
+acc = None
 if __name__ == '__main__':
     preinitialize()
     cli(obj={'account': Account()})
-
-acc = None
-def interactive():
+elif not hasattr(__main__, '__file__'):
     print("Running in interactive mode")
     preinitialize()
 
     module = sys.modules[__name__]
-    global acc
     acc = Account()
     acc.slurp()
 
     glb = globals()
     lcl = locals()
     for ticker in acc.tickers:
-        key, value = ticker.lower(), iex_stocks.Stock(ticker)
+        key, value = ticker.lower(), iex.Stock(ticker)
         setattr(module, key, value)
