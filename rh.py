@@ -889,6 +889,9 @@ ROBIN_STOCKS_API = {
        #'splits'      : PolygonEndpoint(-1, 'reference_stock_splits'),
         'splits'      : IEXFinanceEndpoint(86400, 'get_splits'),
         'yesterday'   : IEXFinanceEndpoint(21600, 'get_previous_day_prices'),
+        'losers'      : IEXFinanceEndpoint(300,   'get_market_losers'),
+        'gainers'     : IEXFinanceEndpoint(300,   'get_market_gainers'),
+        'stats'       : IEXFinanceEndpoint(3600,  'get_key_stats'),
         'historicals' : RobinStocksEndpoint(7200, rh.stocks.get_stock_historicals),
     },
     'options': {
