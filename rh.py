@@ -124,8 +124,12 @@ class StockSplitEvent(Event):
 
 
     def settle(self, stock):
+        stock.bought *= self.multiplier
+        stock.bought /= self.divisor
+
         Event.tally[self.ticker] *= self.multiplier
         Event.tally[self.ticker] /= self.divisor
+
         self.running = Event.tally[self.ticker]
 
     @property
@@ -153,6 +157,7 @@ class TransactionEvent(Event):
         self.ident = Event.ident
         Event.ident += 1
 
+        print(self.ident, qty)
         self.side = side
         self.qty = flt(qty)
         self.price = flt(price)
@@ -240,34 +245,29 @@ class LotConnector:
         event = stock.events[-1]
         assert type(event) is TransactionEvent
 
-        if event.side == 'sell':
-            qty = event.qty
+        qty = event.qty
+        if event.side == 'buy':
+            stock.bought += qty
+
+        elif event.side == 'sell':
+            stock.sold += qty
+
             while qty > ZERO:
-                if stock.pointer < len(stock.events):
-                    if  type(stock.events[stock.pointer]) is StockSplitEvent:
-                        stock.pointer += 1
-                    else:
-                        c = stock.events[stock.pointer].side == 'sell'
-                        d = stock.events[stock.pointer].unsettled <= ZERO
-                        if c or d:
-                            stock.pointer += 1
-                        else:
-                            l = LotConnector(event, stock)
-                            qty -= l.qty
-                else:
-                    l = LotConnector(event, stock)
-                    qty -= l.qty
+                l = LotConnector(event, stock)
+                qty -= l.qty
 
-    def __init__(self, sold, stock):
-        events = stock.events
+    def __init__(self, sold, stock, wtf=False):
+        print('searching for boughts to satisfy the sold...')
 
-        self.sold, self.bought = sold, None
-        while self.bought is None or self.bought.side != 'buy' or self.bought.unsettled <= ZERO:
-            if self.bought is not None:
-                stock.pointer += 1
-            if stock.pointer == len(events):
-                print('FIXME', sold)
-                events.append(
+        self.sold, self.bought, e = sold, None, None
+        while self.bought is None:
+            e = stock.events[stock.pointer]
+
+            if type(e) is TransactionEvent and all((
+                e.side == 'buy', e.unsettled > ZERO
+            )): self.bought = e
+            elif stock.pointer == len(stock.events):
+                stock.events.append(
                     TransactionEvent(
                         stock.ticker,
                         sold.unsettled,
@@ -277,7 +277,11 @@ class LotConnector:
                         'FREE',
                     )
                 )
-            self.bought = events[stock.pointer]
+                self.bought = e
+            else:
+                # The last sale completely depleted the last stock, so need
+                # to increment the pointer.
+                stock.pointer += 1
 
         self.qty = min((self.sold.unsettled, self.bought.unsettled))
         self.term = 'st' if (
@@ -286,13 +290,13 @@ class LotConnector:
         self.sold.tie(self)
         self.bought.tie(self)
 
-    def __repr__(self):
-        return '%s <--(x%0.5f:%s)--> %s' % (
-            self.sold,
-            self.qty,
-            self.term,
-            self.bought,
-        )
+    #def __repr__(self):
+    #    return '%s <--(x%0.5f:%s)--> %s' % (
+    #        self.sold,
+    #        self.portion,
+    #        self.term,
+    #        self.bought,
+    #    )
 
     def portion(self, caller):
         simple = caller.side == 'buy' or self.qty == self.bought.qty
@@ -324,34 +328,39 @@ class StockFIFO:
 
         return True
 
+    @property
+    def traded(self):
+        return self.bought + self.sold
+
     def __init__(self, account, ticker):
+        self.bought = 0
+        self.sold = 0
+
         self.account = account
         self.ticker = ticker
         self.pointer = 0
         self.events = []
-        self.event_pool = sorted(
-            [
-                StockSplitEvent(
-                    ticker=ticker,
-                    #date=ss['exDate'],
-                    #multiplier=ss.get('forfactor', 1),
-                    #divisor=ss.get('tofactor', ss['ratio']),
-                    date=ss['exDate'],
-                    divisor=ss['fromFactor'],
-                    multiplier=ss['toFactor'],
-                ) for ss in account.cached('stocks', 'splits', ticker)
-            ] + [
-                TransactionEvent(
-                    self.ticker,
-                    ec['quantity'],
-                    ec['price'],
-                    ec['side'],
-                    se['updated_at'],
-                    se['type'],
-                ) for se in account.cached('stocks', 'events', ticker)
-                    for ec in se['equity_components']
-            ], key=lambda e: e.timestamp
-        )
+        self.event_pool = [
+            StockSplitEvent(
+                ticker=ticker,
+                #date=ss['exDate'],
+                #multiplier=ss.get('forfactor', 1),
+                #divisor=ss.get('tofactor', ss['ratio']),
+                date=ss['exDate'],
+                divisor=ss['fromFactor'],
+                multiplier=ss['toFactor'],
+            ) for ss in account.cached('stocks', 'splits', ticker)
+        ] + [
+            TransactionEvent(
+                self.ticker,
+                ec['quantity'],
+                ec['price'],
+                ec['side'],
+                se['updated_at'],
+                se['type'],
+            ) for se in account.cached('stocks', 'events', ticker)
+                for ec in se['equity_components']
+        ]
 
     def __getitem__(self, i):
         return self.events[i]
@@ -371,6 +380,9 @@ class StockFIFO:
             e = self.event_pool.pop(0)
             self.events.append(e)
             e.settle(self)
+
+        [print(e.timestamp) for e in self.events]
+        [print(e.timestamp) for e in sorted(self.events, key=lambda e: e.timestamp)]
 
     @property
     def price(self):
@@ -427,6 +439,12 @@ class StockFIFO:
 
 class CSVReader:
     def __init__(self, account, context):
+        '''
+        CSV file is expected to be in reverse time sort order (that's just
+        what the robinhood API happens to return.  No further sorting is done
+        to account for the case where the CSV is not sorted in exactly this
+        manner!
+        '''
         self.active = None
 
         account.cached(
@@ -851,6 +869,7 @@ ROBIN_STOCKS_API = {
         'instrument'  : RobinStocksEndpoint(7200, rh.stocks.get_instrument_by_url),
         'prices'      : RobinStocksEndpoint(7200, rh.stocks.get_latest_price),
         'news'        : RobinStocksEndpoint(7200, rh.stocks.get_news),
+        'quote'       : IEXFinanceEndpoint(7200, 'get_quote'),
         'quotes'      : RobinStocksEndpoint(7200, rh.stocks.get_quotes),
         'ratings'     : RobinStocksEndpoint(7200, rh.stocks.get_ratings),
        #'splits'      : PolygonEndpoint(-1, 'reference_stock_splits'),
