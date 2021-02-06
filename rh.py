@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import os, sys, locale
-import csv, requests
+import csv, requests, tempfile
 import click, pickle, json
 import math, hashlib, random
 from collections import defaultdict, namedtuple
@@ -29,32 +29,9 @@ from pygments.formatters import Terminal256Formatter
 from pprint import pformat
 
 from beautifultable import BeautifulTable
-from colorama import init, Back, Fore
 from termcolor import colored
 
 import __main__
-
-def ts_to_datetime(ts) -> str:
-    return datetime.fromtimestamp(ts / 1000.0).strftime('%Y-%m-%d %H:%M')
-
-def dump(heading, obj):
-    return '%s\n%s' % (
-        heading,
-        highlight((json.dumps(obj, indent=4)), PythonLexer(), Terminal256Formatter()),
-    )
-
-def c(f, n, d, v):
-    n = flt(n)
-    c = d[0]
-    for i, v in enumerate(v):
-        if v < n:
-            c = d[i+1]
-
-    return colored(f % n, c)
-
-def mulla(m):
-    c = 'red' if flt(m) < 0 else 'green'
-    return colored(locale.currency(flt(m), grouping=True), c)
 
 ZERO = 1e-5
 
@@ -62,9 +39,9 @@ flt  = np.single
 rnd  = lambda a, r: round(a / r) * r
 sgn  = lambda n: -1 if n <= 0 else 1
 
-pct  = lambda p: c('%0.2f%%', p, ['red', 'green', 'magenta'], [0, 70])
+pct  = lambda p: colorize('%0.2f%%', p, ['red', 'green', 'magenta'], [0, 70])
 mpct = lambda p: pct(100*p)
-qty  = lambda q, dp=2: c(f'%0.{dp}f', q, ['yellow', 'cyan'], [0])
+qty  = lambda q, dp=2: colorize(f'%0.{dp}f', q, ['yellow', 'cyan'], [0])
 qty0 = lambda q: qty(q, 0)
 qty1 = lambda q: qty(q, 1)
 
@@ -87,6 +64,29 @@ if len(sys.argv) > 0:
     )
     if not posixpath.exists(CACHE_DIR):
         os.mkdir(CACHE_DIR)
+
+
+def ts_to_datetime(ts) -> str:
+    return datetime.fromtimestamp(ts / 1000.0).strftime('%Y-%m-%d %H:%M')
+
+def dump(heading, obj):
+    return '%s\n%s' % (
+        heading,
+        highlight((json.dumps(obj, indent=4)), PythonLexer(), Terminal256Formatter()),
+    )
+
+def colorize(f, n, d, v):
+    n = flt(n)
+    c = d[0]
+    for i, v in enumerate(v):
+        if v < n:
+            c = d[i+1]
+
+    return colored(f % n, c)
+
+def mulla(m):
+    c = 'red' if flt(m) < 0 else 'green'
+    return colored(locale.currency(flt(m), grouping=True), c)
 
 
 class Event:
@@ -141,6 +141,26 @@ class StockSplitEvent(Event):
 class TransactionEvent(Event):
 
     @property
+    def costbasis(self):
+        assert self.side == 'sell'
+
+        # Does DIV go in here?
+        cb = {
+            'st': Counter({ 'qty': 0, 'gain': 0 }),
+            'lt': Counter({ 'qty': 0, 'gain': 0 }),
+        }
+
+        for tie in self.ties:
+            cb[tie.term]['qty'] += tie.qty
+            cb[tie.term]['gain'] -= tie.buy.price * tie.qty
+
+        for term in [t for t in ('st', 'lt') if cb[t]['qty'] > 0]:
+            cb[term]['gain'] += self.price * cb[term]['qty']
+            cb[term]['gain'] /= cb[term]['qty']
+
+        return cb
+
+    @property
     def signum(self):
         return { 'buy': +1, 'sell': -1 }[self.side]
 
@@ -183,51 +203,15 @@ class TransactionEvent(Event):
             self.timestamp,
         )
 
-        if self.side == 'sell':
-            cb = self.costbasis
-            stg = cb['st']['gain']
-            stq = cb['st']['qty']
-            ltg = cb['lt']['gain']
-            ltq = cb['lt']['qty']
-            rstr += ' | cb=[st=%sx%s=%s, lt=%sx%s=%s]' % (
-                mulla(stg), qty(stq), mulla(stg * stq),
-                mulla(ltg), qty(ltq), mulla(ltg * ltq),
-            )
-
         return '<TransactionEvent %s>' % rstr
 
     @property
     def term(self):
-        term = '--'
-        if self.side == 'buy':
-            if len(self.ties) == 1:
-                term = self.ties[0].term
-            else:
-                term = 'st' if (
-                    (now() - self.timestamp) <= timedelta(days=365, seconds=0)
-                ) else 'lt'
+        if self.side == 'sell': return 'n/a'
 
-        return term
-
-    @property
-    def costbasis(self):
-        assert self.side == 'sell'
-
-        # Does DIV go in here?
-        cb = {
-            'st': Counter({ 'qty': 0, 'gain': 0 }),
-            'lt': Counter({ 'qty': 0, 'gain': 0 }),
-        }
-
-        for tie in self.ties:
-            cb[tie.term]['qty'] += tie.qty
-            cb[tie.term]['gain'] -= tie.bought.price * tie.qty
-
-        for term in [t for t in ('st', 'lt') if cb[t]['qty'] > 0]:
-            cb[term]['gain'] += self.price * cb[term]['qty']
-            cb[term]['gain'] /= cb[term]['qty']
-
-        return cb
+        return self.ties[0].term if len(self.ties) == 1 else 'st' if (
+            (now() - self.timestamp) <= timedelta(days=365, seconds=0)
+        ) else 'lt'
 
     @property
     def unsettled(self):
@@ -256,13 +240,15 @@ class LotConnector:
                 l = LotConnector(event, stock)
                 qty -= l.qty
 
-    def __init__(self, sold, stock, wtf=False):
-        self.sold, self.bought, e = sold, None, None
-        while self.bought is None:
+    def __init__(self, sell, stock, wtf=False):
+        self.sell, self.buy, e = sell, None, None
+        self.underlying = stock
+
+        while self.buy is None:
             e = stock.events[stock.pointer]
             if type(e) is TransactionEvent and all((
                 e.side == 'buy', e.unsettled > ZERO
-            )): self.bought = e
+            )): self.buy = e
             else:
                 # The last sale completely depleted the last stock, so need
                 # to increment the pointer.
@@ -272,70 +258,144 @@ class LotConnector:
                 if stock.pointer == len(stock.events):
                     e = TransactionEvent(
                         stock.ticker,
-                        sold.unsettled,
+                        sell.unsettled,
                         0.00,
                         'buy',
                         str(datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc)),
                         'FREE',
                     )
                     stock.events.append(e)
-                    self.bought = e
+                    self.buy = e
 
         # we either depleted the buy, or the sell, whichever comes first. if
         # the sell is depleted, that means the caller is done, else, the caller
         # will call this constructor again with the next buy, until the sell
         # is satisfied
-        self.qty = min((self.sold.unsettled, self.bought.unsettled))
+        self.qty = min((self.sell.unsettled, self.buy.unsettled))
 
         # short-term or long-term sale (was the buy held over a year)
-        delta = (self.sold.timestamp - self.bought.timestamp)
+        delta = (self.sell.timestamp - self.buy.timestamp)
         self.term = 'st' if delta <= timedelta(days=365, seconds=0) else 'lt'
 
         # finally, the aim of this object: to connect the sell to the corresponding buy
-        self.sold.tie(self)
-        self.bought.tie(self)
+        self.sell.tie(self)
+        self.buy.tie(self)
 
-    def __repr__(self):
-        return '%s <--(x%0.5f:%s)--> %s' % (
-            self.sold,
-            self.portion,
-            self.term,
-            self.bought,
-        )
+    @property
+    def bought(self):
+        return self.buy.qty
+
+    @property
+    def sold(self):
+        return self.sell.qty
 
     def portion(self, caller):
-        simple = caller.side == 'buy' or self.qty == self.bought.qty
+        simple = False #caller.side == 'buy' or self.qty == self.bought
         return qty(self.qty) if simple else '%s of %s' % (
-            qty(self.qty), qty(self.bought.qty)
+            qty(self.qty), qty(self.bought)
         )
 
 class StockFIFO:
+    @property
+    def earnings(self):
+        return self.account.cached('events', 'earnings', self.ticker)
+
+    @property
+    def yesterday(self):
+        return self.account.cached('stocks', 'yesterday', self.ticker)
+
+    @property
+    def marketcap(self):
+        return self.account.cached('stocks', 'marketcap', self.ticker)
+
+    @property
+    def stats(self):
+        return self.account.cached('stocks', 'stats', self.ticker)
+
+    @property
+    def beta(self):
+        return self._iex_stock.get_beta()
+
+    @property
+    def ttm_eps(self):
+        return self.stats['ttmEPS']
+
+    @property
+    def fundamentals(self):
+        return self.account.cached('stocks', 'fundamentals', self.tickers)[0]
+
+    @property
+    def price(self):
+        return flt(self.account.cached('stocks', 'prices', self.ticker)[0])
+
+    @property
+    def robinhood_id(self):
+        '''Map ticker to robinhood id'''
+        return self.account.cached('stocks', 'instruments', self.ticker, info='id').pop(0)
+
     @property
     def timestamp(self):
         return self.events[-1].timestamp
 
     @property
-    def transactions(self):
-        return [e for e in self.events if type(e) is TransactionEvent]
+    def sells(self):
+        return filter(lambda e: e.side == 'sell', self.transactions)
+
+    @property
+    def buys(self):
+        return filter(lambda e: e.side == 'buy', self.transactions)
+
+    @property
+    def transactions(self, reverse=False):
+        return filter(lambda e: type(e) is TransactionEvent, self.events)
 
     @property
     def subject2washsale(self):
-        thirty = timedelta(days=30, seconds=0)
-        current = self.transactions[-1]
-        if (now() - current.timestamp) > thirty:
-            if len(self.transactions) > 1:
-                last = self.transactions[-2]
-                current = self.transactions[-1]
-                if (current.timestamp - last.timestamp) > thirty:
-                    return False
-            else:
-                return False
+        '''<now> <-- >30d? --> <current> <-- >30d? --> <last>'''
 
+        thirty = timedelta(days=30, seconds=0)
+        transactions = self.transactions
+        current, last = None, None
+        try:
+            while True: last, current = next(transactions), next(transactions)
+        except StopIteration:
+            pass
+
+        assert current is not None
+
+        if (now() - current.timestamp) <= thirty: return True
+        if last and (current.timestamp - last.timestamp) > thirty: return False
         return True
 
     @property
     def traded(self):
         return self.bought + self.sold
+
+    def _splits(self):
+        return [
+            StockSplitEvent(
+                ticker=self.ticker,
+                #date=ss['exDate'],
+                #multiplier=ss.get('forfactor', 1),
+                #divisor=ss.get('tofactor', ss['ratio']),
+                date=ss['exDate'],
+                divisor=ss['fromFactor'],
+                multiplier=ss['toFactor'],
+            ) for ss in self.account.cached('stocks', 'splits', self.ticker)
+        ]
+
+    def _events(self):
+         return [
+            TransactionEvent(
+                self.ticker,
+                ec['quantity'],
+                ec['price'],
+                ec['side'],
+                se['updated_at'],
+                se['type'],
+            ) for se in self.account.cached('events', 'activities', self.ticker)
+                for ec in se['equity_components']
+        ]
 
     def __init__(self, account, ticker):
         self.bought = 0
@@ -345,50 +405,29 @@ class StockFIFO:
         self.ticker = ticker
         self.pointer = 0
         self.events = []
-        self.event_pool = [
-            StockSplitEvent(
-                ticker=ticker,
-                #date=ss['exDate'],
-                #multiplier=ss.get('forfactor', 1),
-                #divisor=ss.get('tofactor', ss['ratio']),
-                date=ss['exDate'],
-                divisor=ss['fromFactor'],
-                multiplier=ss['toFactor'],
-            ) for ss in account.cached('stocks', 'splits', ticker)
-        ] + [
-            TransactionEvent(
-                self.ticker,
-                ec['quantity'],
-                ec['price'],
-                ec['side'],
-                se['updated_at'],
-                se['type'],
-            ) for se in account.cached('stocks', 'events', ticker)
-                for ec in se['equity_components']
-        ]
+        self._event_pool = self._splits() + self._events()
+
+        self._iex_stock = iex.Stock(self.ticker)
 
     def __getitem__(self, i):
         return self.events[i]
 
     def __repr__(self):
-        return '<StockFIFO:%-5s x%8.2f @ mean:%s>' % (
+        return '<StockFIFO %s x %s @ mean unit cost of %s and current equity of %s>' % (
             self.ticker,
-            self.quantity,
+            qty(self.quantity),
             mulla(self.average),
+            mulla(self.price),
         )
 
     def push(self, transaction):
-        self.event_pool.append(transaction)
-        self.event_pool.sort(key=lambda e: e.timestamp)
+        self._event_pool.append(transaction)
+        self._event_pool.sort(key=lambda e: e.timestamp)
         e = None
         while e is not transaction:
-            e = self.event_pool.pop(0)
+            e = self._event_pool.pop(0)
             self.events.append(e)
             e.settle(self)
-
-    @property
-    def price(self):
-        return self.account.get_price(self.ticker)
 
     @property
     def average(self):
@@ -492,9 +531,8 @@ class CSVReader:
 
 
 class StockReader(CSVReader):
-    def __init__(self, account, mocked=False):
-        context = 'stock' if mocked is False else 'test'
-        super().__init__(account, context)
+    def __init__(self, account):
+        super().__init__(account, 'stocks')
         self._ticker_field = 'symbol'
 
     @property
@@ -517,7 +555,7 @@ class StockReader(CSVReader):
 
 
 #class OptionReader(CSVReader):
-#    def __init__(self, account, importer='option'):
+#    def __init__(self, account, importer='options'):
 #        super().__init__(account, importer)
 #        self._ticker_field = 'chain_symbol'
 #
@@ -558,7 +596,7 @@ class StockReader(CSVReader):
 
 
 class Account:
-    def __init__(self, mocked=False):
+    def __init__(self):
         self.robinhood = None
         self.yec = None
 
@@ -568,12 +606,13 @@ class Account:
 
         self._portfolio = {}
         self.tickers = None
-        self.stockReader = StockReader(self, mocked)
+        self.stockReader = StockReader(self)
         #self.optionReader = OptionReader(self)
 
         self.data = None
 
     def get_stock(self, ticker):
+        ticker = ticker.upper()
         if ticker not in self._portfolio:
             self._portfolio[ticker] = StockFIFO(self, ticker)
 
@@ -603,10 +642,6 @@ class Account:
             os.environ['IEX_TOKEN'] = self.iex_api_key
             os.environ['IEX_OUTPUT_FORMAT'] = 'json'
 
-    def ticker2id(self, ticker):
-        '''Map ticker to robinhood id'''
-        return self.cached('stocks', 'instruments', ticker, info='id')[0]
-
     def slurp(self):
         for ticker, parameters in self.transactions():
             transaction = TransactionEvent(ticker, *parameters)
@@ -626,6 +661,8 @@ class Account:
         fundamentals = self._get_fundamentals()
 
         for ticker, datum in self.data.items():
+            fifo = self.get_stock(ticker)
+
             datum['ticker'] = ticker
             datum['premium_collected'] = positions['premiums'][ticker]
             datum['dividends_collected'] = sum([
@@ -635,6 +672,9 @@ class Account:
             datum['pe_ratio'] = flt(fundamentals[ticker]['pe_ratio'])
             datum['pb_ratio'] = flt(fundamentals[ticker]['pb_ratio'])
             datum['price'] = flt(prices[ticker])
+            datum['marketcap'] = fifo.marketcap
+            datum['50dma'] = fifo.stats['day50MovingAvg']
+            datum['200dma'] = fifo.stats['day200MovingAvg']
 
     def _get_costbasis(self):
         #TODO: Add realized as well as unrealized for this data
@@ -648,12 +688,12 @@ class Account:
                 'lt_cb_qty':      0,
                 'lt_cb_capgain':  0,
             })
-            for trans in (t for t in stock.transactions if t.side == 'sell'):
+            for sell in stock.sells:
                 costbasis[ticker].update({
-                    'st_cb_qty':     trans.costbasis['st']['qty'],
-                    'st_cb_capgain': trans.costbasis['st']['gain'],
-                    'lt_cb_qty':     trans.costbasis['lt']['qty'],
-                    'lt_cb_capgain': trans.costbasis['lt']['gain'],
+                    'st_cb_qty':     sell.costbasis['st']['qty'],
+                    'st_cb_capgain': sell.costbasis['st']['gain'],
+                    'lt_cb_qty':     sell.costbasis['lt']['qty'],
+                    'lt_cb_capgain': sell.costbasis['lt']['gain'],
                 })
         return costbasis
 
@@ -674,19 +714,11 @@ class Account:
             )
         )
 
-    def get_price(self, ticker):
-        return self._get_prices().get(
-            ticker,
-            flt(self.cached('stocks', 'prices', ticker)[0])
-        )
-
     def _get_prices(self):
-        return dict(
-            zip(
-                self.tickers,
-                map(flt, self.cached('stocks', 'prices', self.tickers))
-            )
-        )
+        return dict(zip(
+            self.tickers,
+            self.cached('stocks', 'prices', self.tickers)
+        ))
 
     def _get_positions(self):
         data = self.cached('options', 'positions:all')
@@ -698,7 +730,8 @@ class Account:
             uri = option['option']
             instrument = self.cached('stocks', 'instrument', uri)
             if instrument['state'] == 'expired':
-                raise
+                pass
+                #raise
             elif instrument['tradability'] == 'untradable':
                 raise
 
@@ -820,11 +853,8 @@ class Account:
                 else:
                     raise
             elif type(endpoint) is YahooEarningsCalendarEndpoint:
-                if area == 'events' and subarea == 'earnings':
-                    fn = getattr(self.yec, endpoint.function)
-                    data = datetime.fromtimestamp(fn(args[0]))
-                else:
-                    raise
+                fn = getattr(self.yec, endpoint.function)
+                data = datetime.fromtimestamp(fn(args[0]))
             else:
                 data = endpoint.function(*args, **kwargs)
 
@@ -835,7 +865,11 @@ class Account:
             dprint("Cache fault on %s:%s(%s)" % (
                 area, subarea, ','.join(arguments),
             ))
-            pickle.dump(data, open(cachefile, 'wb'))
+
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                pickle.dump(data, tmp)
+                tmp.flush()
+                os.rename(tmp.name, cachefile)
 
         return data
 
@@ -876,23 +910,22 @@ ROBIN_STOCKS_API = {
         'user'        : RobinStocksEndpoint(7200, rh.profiles.load_user_profile),
     },
     'stocks': {
-        'earning'     : RobinStocksEndpoint(7200, rh.stocks.get_earnings),
-        'events'      : RobinStocksEndpoint(7200, rh.stocks.get_events),
-        'fundamentals': RobinStocksEndpoint(7200, rh.stocks.get_fundamentals),
-        'instruments' : RobinStocksEndpoint(7200, rh.stocks.get_instruments_by_symbols),
-        'instrument'  : RobinStocksEndpoint(7200, rh.stocks.get_instrument_by_url),
-        'prices'      : RobinStocksEndpoint(7200, rh.stocks.get_latest_price),
-        'news'        : RobinStocksEndpoint(7200, rh.stocks.get_news),
-        'quote'       : IEXFinanceEndpoint(7200, 'get_quote'),
-        'quotes'      : RobinStocksEndpoint(7200, rh.stocks.get_quotes),
-        'ratings'     : RobinStocksEndpoint(7200, rh.stocks.get_ratings),
+        'fundamentals': RobinStocksEndpoint(7200,  rh.stocks.get_fundamentals),
+        'instruments' : RobinStocksEndpoint(7200,  rh.stocks.get_instruments_by_symbols),
+        'instrument'  : RobinStocksEndpoint(7200,  rh.stocks.get_instrument_by_url),
+        'prices'      : RobinStocksEndpoint(7200,  rh.stocks.get_latest_price),
+        'news'        : RobinStocksEndpoint(7200,  rh.stocks.get_news),
+        'quote'       : IEXFinanceEndpoint(7200,  'get_quote'),
+        'quotes'      : RobinStocksEndpoint(7200,  rh.stocks.get_quotes),
+        'ratings'     : RobinStocksEndpoint(7200,  rh.stocks.get_ratings),
        #'splits'      : PolygonEndpoint(-1, 'reference_stock_splits'),
-        'splits'      : IEXFinanceEndpoint(86400, 'get_splits'),
-        'yesterday'   : IEXFinanceEndpoint(21600, 'get_previous_day_prices'),
-        'losers'      : IEXFinanceEndpoint(300,   'get_market_losers'),
-        'gainers'     : IEXFinanceEndpoint(300,   'get_market_gainers'),
-        'stats'       : IEXFinanceEndpoint(3600,  'get_key_stats'),
-        'historicals' : RobinStocksEndpoint(7200, rh.stocks.get_stock_historicals),
+        'splits'      : IEXFinanceEndpoint(86400,  'get_splits'),
+        'yesterday'   : IEXFinanceEndpoint(21600,  'get_previous_day_prices'),
+        'marketcap'   : IEXFinanceEndpoint(86400,  'get_market_cap'),
+        'losers'      : IEXFinanceEndpoint(300,    'get_market_losers'),
+        'gainers'     : IEXFinanceEndpoint(300,    'get_market_gainers'),
+        'stats'       : IEXFinanceEndpoint(21600,  'get_key_stats'),
+        'historicals' : RobinStocksEndpoint(7200,  rh.stocks.get_stock_historicals),
     },
     'options': {
         'positions:all'  : RobinStocksEndpoint(300, rh.options.get_all_option_positions),
@@ -910,7 +943,10 @@ ROBIN_STOCKS_API = {
         'movers'         : RobinStocksEndpoint(3600, rh.markets.get_top_movers),
     },
     'events': {
-        'earnings'       : YahooEarningsCalendarEndpoint(86400, 'get_next_earnings_date'),
+        'earnings:next'  : YahooEarningsCalendarEndpoint(21600, 'get_next_earnings_date'),
+        'earnings:all'   : YahooEarningsCalendarEndpoint(86400, 'get_earnings_of'),
+        'earnings'       : RobinStocksEndpoint(7200,  rh.stocks.get_earnings),
+        'activities'     : RobinStocksEndpoint(7200,  rh.stocks.get_events),
     },
     'account': {
         'notifications'  : RobinStocksEndpoint(3600, rh.account.get_latest_notification),
@@ -924,8 +960,8 @@ ROBIN_STOCKS_API = {
         'holdings'       : RobinStocksEndpoint(3600, rh.account.build_holdings),
     },
     'export': {
-        'stock'          : RobinStocksEndpoint(3*3600, rh.export_completed_stock_orders),
-        'option'         : RobinStocksEndpoint(3*3600, rh.export_completed_option_orders),
+        'stocks'         : RobinStocksEndpoint(3*3600, rh.export_completed_stock_orders),
+        'options'        : RobinStocksEndpoint(3*3600, rh.export_completed_option_orders),
     },
 }
 
@@ -1001,7 +1037,8 @@ VIEWS = {
             'equity_change', 'percent_change',
             'cost_basis', 'growth',
             'premium_collected', 'dividends_collected',
-            'short', 'bucket', 'rank', 'since_close', 'since_open', 'safe2trade',
+            'short', 'bucket', 'rank', 'since_close', 'since_open', 'alerts',
+            'pe_ratio', 'pb_ratio', 'beta',
             'activities',
         ],
     },
@@ -1050,14 +1087,41 @@ def tabulize(ctx, view, reverse, limit):
         index = fifo.pointer
         buy = fifo[index]
         assert buy.side == 'buy'
-        datum['safe2trade'] = ' '.join((
-            colored('ST!', 'red') if buy.term == 'st' else colored('lt', 'blue'),
-            colored('WS!', 'red') if fifo.subject2washsale else colored('wsx', 'blue'),
-        ))
+
+        alerts = []
+
+        marketcap = datum['marketcap']
+        if marketcap is not None:
+            marketcap /= 1000000000
+            if marketcap > 10: sizestr = colored('L', 'green')
+            elif marketcap > 2:
+                if 4 < marketcap < 5:
+                    sizestr = colored('SWEET!', 'magenta')
+                else:
+                    sizestr = colored('M', 'blue')
+            else: sizestr = colored('S', 'yellow')
+        else:
+            marketcap, sizestr = 0, colored('?', 'red')
+        alerts.append('%s/%sB' % (sizestr, mulla(marketcap)))
+
+        if buy.term == 'st': alerts.append(colored('ST!', 'yellow'))
+
+        if fifo.subject2washsale: alerts.append(colored('WS!', 'yellow'))
+
+        if datum['pe_ratio'] < 10: alerts.append(colored('PE!', 'red'))
 
         p = datum['price']
 
-        yesterday = account.cached('stocks', 'yesterday', ticker)
+        if p > datum['50dma'] > datum['200dma']:
+            alerts.append(colored('STRONG!', 'green'))
+        elif p < datum['50dma'] < datum['200dma']:
+            alerts.append(colored('CRASH!', 'red'))
+        else:
+            alerts.append(colored('WEAK!', 'yellow'))
+
+        datum['alerts'] = ' '.join(alerts)
+
+        yesterday = fifo.yesterday
         yesterchange = yesterday['marketChangeOverTime']
 
         c = yesterday['close']
@@ -1127,6 +1191,7 @@ def tabulize(ctx, view, reverse, limit):
         'percent_change': pct,
         'equity_change': mulla,
         'pe_ratio': qty,
+        'pb_ratio': qty,
         'percentage': pct,
         'rank': int,
         'delta': qty,
@@ -1187,15 +1252,26 @@ if __name__ == '__main__':
     preinitialize()
     cli(obj={'account': Account()})
 elif not hasattr(__main__, '__file__'):
-    print("Running in interactive mode")
+    print("Interactive Execution Mode Detected")
+
+    print("Pre-Initializing REPL Environment...")
     preinitialize()
 
+    print("Initializing REPL Environment...")
     module = sys.modules[__name__]
     acc = Account()
     acc.slurp()
 
-    glb = globals()
-    lcl = locals()
+    print("Injecting Stock Objects for all known Tickers from Robinhood...")
     for ticker in acc.tickers:
-        key, value = ticker.lower(), iex.Stock(ticker)
-        setattr(module, key, value)
+        key = ticker.lower()
+        setattr(module, key, acc.get_stock(ticker))
+        setattr(module, '_%s' % key, iex.Stock(ticker))
+
+    print("Done! Available ticker objects:")
+    print(" + rh.acc           (Local Robinhood Account object)")
+    print(" + rh.acc.rh        (RobinStocksEndpoint API)")
+    print(" + rh.acc.iex       (IEXFinanceEndpoint API)")
+    print(" + rh.acc.yec       (YahooEarningsCalendarEndpoint API)")
+    print(" + rh._<ticker>     (IEXFinanceEndpoint Stock object API)")
+    print(" + rh.<ticker>      (Local Stock object API multiplexor")

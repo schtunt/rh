@@ -3,7 +3,7 @@ import pytest
 
 rh.CACHE_DIR='/tmp'
 MOCKED_APIS = {
-    'export:test': None,
+    'export:stocks': None,
     'stocks:splits': [{
         'date': 1598832000000,
         'declaredDate': None,
@@ -77,9 +77,42 @@ MOCKED_APIS = {
         'volume': '89393460.000000',
         'year_founded': 1976,
     }],
+    'stocks:stats': {
+        'avg10Volume': 108492565,
+        'avg30Volume': 108727355,
+        'beta': 1.14690182912981,
+        'companyName': 'Apple Inc',
+        'day200MovingAvg': 119.64,
+        'day30ChangePercent': 0.08186701958926057,
+        'day50MovingAvg': 133.12,
+        'day5ChangePercent': 0.0379233639767127,
+        'dividendYield': 0.007378098907391369,
+        'employees': 0,
+        'exDividendDate': '2021-02-05',
+        'float': 0,
+        'marketcap': 2295940008960,
+        'maxChangePercent': 51.40047511398904,
+        'month1ChangePercent': 0.045449854565051906,
+        'month3ChangePercent': 0.15265614082700285,
+        'month6ChangePercent': 0.2488186172228486,
+        'nextDividendDate': '',
+        'nextEarningsDate': '2021-01-27',
+        'peRatio': 35.913342858751754,
+        'sharesOutstanding': 16788096000,
+        'ttmDividendRate': 1.0090288065748436,
+        'ttmEPS': 3.68,
+        'week52change': 0.7225895271695797,
+        'week52high': 142.95,
+        'week52low': 55.66,
+        'year1ChangePercent': 0.7190514797845529,
+        'year2ChangePercent': 2.2201857328536176,
+        'year5ChangePercent': 5.255546102405064,
+        'ytdChangePercent': 0.03221326570660876
+    },
     'stocks:instrument': 'AAPL',
     'stocks:prices': ['135.000000'],
-    'stocks:events': [],
+    'stocks:marketcap': 0,
+    'events:activities': [],
     'orders:stocks:open': [],
     'orders:options:all': [],
     'options:positions:all': [],
@@ -93,15 +126,15 @@ def cached(self, area, subarea, *args, **kwargs):
 def initialize_session():
     rh.preinitialize()
 
-@pytest.fixture(scope='session')
-def account():
-    account = rh.Account(mocked=True)
-    account.slurp()
-    return account
-
 @pytest.fixture(scope='session', autouse=True)
 def initialize_function(session_mocker):
     session_mocker.patch.object(rh.Account, 'cached', cached)
+
+@pytest.fixture(scope='session')
+def account():
+    account = rh.Account()
+    account.slurp()
+    return account
 
 @pytest.fixture
 def debug(account):
