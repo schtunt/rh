@@ -142,26 +142,48 @@ def debug(account):
     for e in aapl.events:
         print(e)
 
-def test_account_general(account):
+@pytest.fixture(scope='function')
+def trades():
+    '''This must be 1:1 with test.csv'''
+    return [
+        (150,80), (100,90), (25,120), (25,130), (-150,150),
+        (14,140), (12,145), (6,150) ,(-150,220),
+        (202,200), (6,240), (10,350)
+    ]
+
+def test_account_general(account, trades):
     aapl = account.get_stock('AAPL')
     assert aapl.ticker == 'AAPL'
 
-def test_stock_pointer(account):
+def test_stock_pointer(account, trades):
     aapl = account.get_stock('AAPL')
     assert aapl.pointer == 4
 
-def test_stock_quantities(account):
+def test_stock_quantities_bought(account, trades):
     aapl = account.get_stock('AAPL')
 
+    # sum(filter(lambda t: t>0, map(lambda t: t[0], trades)))
     # ( grep buy test.csv |cut -d, -f 6|paste -sd+ - | bc ) 2>/dev/null
     assert aapl.bought == 550
 
+def test_stock_quantities_sold(account, trades):
+    aapl = account.get_stock('AAPL')
+
+    # sum(filter(lambda t: t>0, map(lambda t: -t[0], trades)))
     # ( grep sell test.csv |cut -d, -f 6|paste -sd+ - | bc ) 2>/dev/nul
     assert aapl.sold == 300
 
+def test_stock_quantities_traded(account, trades):
+    aapl = account.get_stock('AAPL')
+
+    # sum(map(lambda t: abs(t[0]), trades))
     # ( tail -n +2 test.csv |cut -d, -f 6|paste -sd+ - | bc ) 2>/dev/null
     assert aapl.traded == 850
 
+def test_stock_quantities_held(account, trades):
+    aapl = account.get_stock('AAPL')
+
+    # sum(map(lambda t: t[0], trades))
     assert aapl.quantity == 250
 
 #def test_stock_cost(account):

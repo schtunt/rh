@@ -5,6 +5,7 @@ import csv, requests, tempfile
 import click, pickle, json
 import math, hashlib, random
 from collections import defaultdict, namedtuple
+from functools import reduce
 
 import pytz
 from datetime import datetime, timedelta, timezone
@@ -91,47 +92,16 @@ def mulla(m):
 
 class Event:
     ident = 0
-    tally = defaultdict(int)
 
     mappings = {
         'FCAU': 'STLA'
     }
     def __init__(self, ticker):
-        self.running = 0
-        self.ticker = Event.mappings.get(ticker, ticker)
-
-class StockSplitEvent(Event):
-    def __init__(self, ticker, date, multiplier, divisor):
-        super().__init__(ticker)
-
         self.ident = Event.ident
         Event.ident += 1
 
-        self.timestamp = pytz.UTC.localize(dtp.parse(date))
-        self.multiplier = flt(multiplier)
-        self.divisor = flt(divisor)
-
-    def __repr__(self):
-        rstr = '#%05d %s %s stock-split %s-for-%s @ %s' % (
-            self.ident,
-            self.ticker,
-            qty(self.running),
-            qty(self.multiplier),
-            qty(self.divisor),
-            self.timestamp,
-        )
-
-        return '<StockSplitEvent  %s>' % rstr
-
-
-    def settle(self, stock):
-        stock.bought *= self.multiplier
-        stock.bought /= self.divisor
-
-        Event.tally[self.ticker] *= self.multiplier
-        Event.tally[self.ticker] /= self.divisor
-
-        self.running = Event.tally[self.ticker]
+        self.running = 0
+        self.ticker = Event.mappings.get(ticker, ticker)
 
     @property
     def unsettled(self):
@@ -139,51 +109,15 @@ class StockSplitEvent(Event):
 
 
 class TransactionEvent(Event):
-
-    @property
-    def costbasis(self):
-        assert self.side == 'sell'
-
-        # Does DIV go in here?
-        cb = {
-            'st': Counter({ 'qty': 0, 'gain': 0 }),
-            'lt': Counter({ 'qty': 0, 'gain': 0 }),
-        }
-
-        for tie in self.ties:
-            cb[tie.term]['qty'] += tie.qty
-            cb[tie.term]['gain'] -= tie.buy.price * tie.qty
-
-        for term in [t for t in ('st', 'lt') if cb[t]['qty'] > 0]:
-            cb[term]['gain'] += self.price * cb[term]['qty']
-            cb[term]['gain'] /= cb[term]['qty']
-
-        return cb
-
-    @property
-    def signum(self):
-        return { 'buy': +1, 'sell': -1 }[self.side]
-
-    def settle(self, stock):
-        Event.tally[self.ticker] += self.signum * self.qty
-        self.running = Event.tally[self.ticker]
-        LotConnector.settle(stock)
-
-    def tie(self, tie):
-        self.ties.append(tie)
-
     def __init__(self, ticker, qty, price, side, timestamp, otype):
         super().__init__(ticker)
-
-        self.ident = Event.ident
-        Event.ident += 1
 
         self.side = side
         self.qty = flt(qty)
         self.price = flt(price)
         self.timestamp = dtp.parse(timestamp)
-        self.ties = []
         self.otype = otype
+        self.connections = []
 
     def __repr__(self):
         q = qty(self.qty)
@@ -206,6 +140,107 @@ class TransactionEvent(Event):
         return '<TransactionEvent %s>' % rstr
 
     @property
+    def available(self):
+        '''
+        of the total number of shares associated with this transaction, how many
+        have not yet been accounted for via a sell.
+        '''
+        return self.qty - sum([lc.qty for lc in self.connections])
+
+    def connect(self, connection):
+        self.connections.append(connection)
+
+    def settlement(self, bought, sold):
+        if self.side == 'buy':
+            bought += self.qty
+        elif self.side == 'sell':
+            sold += self.qty
+        else:
+            raise
+
+        return bought, sold
+
+
+class StockSplitEvent(Event):
+    def __init__(self, ticker, date, multiplier, divisor):
+        super().__init__(ticker)
+
+        self.timestamp = pytz.UTC.localize(dtp.parse(date))
+        self.multiplier = flt(multiplier)
+        self.divisor = flt(divisor)
+
+    def __repr__(self):
+        rstr = '#%05d %s %s stock-split %s-for-%s @ %s' % (
+            self.ident,
+            self.ticker,
+            qty(self.running),
+            qty(self.multiplier),
+            qty(self.divisor),
+            self.timestamp,
+        )
+
+        return '<StockSplitEvent  %s>' % rstr
+
+    def settlement(self, bought, sold):
+        bought *= self.multiplier
+        bought /= self.divisor
+
+        return bought, sold
+
+class Lot:
+    def __init__(self, stock, sell):
+        '''
+        Every sell (transaction event) will have a corresponding realized Lot,
+        and there's one additional active (unrealized) Lot per ticker, if any
+        non-zero number of shares are still held for that stock beyond the last
+        sale or first investment in the stock.
+        '''
+        self.type = 'realized'
+        self.sell, self.qty = sell, sell.qty
+        self.buys = []
+
+        remaining = self.qty
+        while remaining > ZERO:
+            # Bad data from robinhood; workaround
+            if stock.pointer == len(stock.events):
+                e = TransactionEvent(
+                    stock.ticker,
+                    sell.unsettled,
+                    0.00,
+                    'buy',
+                    str(datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc)),
+                    'FREE',
+                )
+                stock.events.append(e)
+
+            buy = stock.events[stock.pointer]
+            if type(buy) is TransactionEvent and all((
+                buy.side == 'buy',
+                buy.available > ZERO,
+            )):
+                lc = LotConnector(buy=buy, sell=self.sell, requesting=remaining)
+                remaining -= lc.qty
+                self.buys.append(lc)
+            else:
+                stock.pointer += 1
+
+    def bought(self):
+        return {
+            'qty': sum(map(lambda lc: lc.qty, self.buys)),
+            'value': sum(map(lambda lc: lc.qty * lc.price, self.buys)),
+        }
+
+    def sold(self):
+        return {
+            'qty': self.sell.qty,
+            'value': self.sell.qty * self.sell.price,
+        }
+
+    @property
+    def washsale_exempt(self):
+        return True or False
+
+    @property
     def term(self):
         if self.side == 'sell': return 'n/a'
 
@@ -223,77 +258,40 @@ class TransactionEvent(Event):
         '''
         return self.qty - sum([tie.qty for tie in self.ties])
 
+    @property
+    def costbasis(self):
+        costbasis = {
+            'short': Counter({ 'qty': 0, 'value': 0 }),
+            'long':  Counter({ 'qty': 0, 'value': 0 }),
+        }
+
+        for lc in self.buys:
+            costbasis[lc.term] += Counter({
+                'qty': lc.qty,
+                'value': lc.costbasis,
+            })
+
+        return costbasis
+
 class LotConnector:
-    @classmethod
-    def settle(self, stock):
-        event = stock.events[-1]
-        assert type(event) is TransactionEvent
-
-        qty = event.qty
-        if event.side == 'buy':
-            stock.bought += qty
-
-        elif event.side == 'sell':
-            stock.sold += qty
-
-            while qty > ZERO:
-                l = LotConnector(event, stock)
-                qty -= l.qty
-
-    def __init__(self, sell, stock, wtf=False):
-        self.sell, self.buy, e = sell, None, None
-        self.underlying = stock
-
-        while self.buy is None:
-            e = stock.events[stock.pointer]
-            if type(e) is TransactionEvent and all((
-                e.side == 'buy', e.unsettled > ZERO
-            )): self.buy = e
-            else:
-                # The last sale completely depleted the last stock, so need
-                # to increment the pointer.
-                stock.pointer += 1
-
-                # Bad data from robinhood; workaround
-                if stock.pointer == len(stock.events):
-                    e = TransactionEvent(
-                        stock.ticker,
-                        sell.unsettled,
-                        0.00,
-                        'buy',
-                        str(datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc)),
-                        'FREE',
-                    )
-                    stock.events.append(e)
-                    self.buy = e
+    def __init__(self, buy, sell, requesting):
+        self.buy, self.sell = buy, sell
 
         # we either depleted the buy, or the sell, whichever comes first. if
         # the sell is depleted, that means the caller is done, else, the caller
         # will call this constructor again with the next buy, until the sell
         # is satisfied
-        self.qty = min((self.sell.unsettled, self.buy.unsettled))
+        self.qty = min(requesting, buy.available)
+        self.buy.connect(self)
 
         # short-term or long-term sale (was the buy held over a year)
         delta = (self.sell.timestamp - self.buy.timestamp)
-        self.term = 'st' if delta <= timedelta(days=365, seconds=0) else 'lt'
-
-        # finally, the aim of this object: to connect the sell to the corresponding buy
-        self.sell.tie(self)
-        self.buy.tie(self)
+        self.term = 'short' if delta <= timedelta(days=365, seconds=0) else 'long'
 
     @property
-    def bought(self):
-        return self.buy.qty
+    def costbasis(self):
+        return (self.sell.price - self.buy.price) * self.qty
 
-    @property
-    def sold(self):
-        return self.sell.qty
-
-    def portion(self, caller):
-        simple = False #caller.side == 'buy' or self.qty == self.bought
-        return qty(self.qty) if simple else '%s of %s' % (
-            qty(self.qty), qty(self.bought)
-        )
 
 class StockFIFO:
     @property
@@ -404,6 +402,7 @@ class StockFIFO:
         self.account = account
         self.ticker = ticker
         self.pointer = 0
+        self.lots = []
         self.events = []
         self._event_pool = self._splits() + self._events()
 
@@ -420,14 +419,34 @@ class StockFIFO:
             mulla(self.price),
         )
 
+    @property
+    def costbasis(self):
+        costbasis = {
+            'short': Counter({ 'qty': 0, 'value': 0 }),
+            'long':  Counter({ 'qty': 0, 'value': 0 }),
+        }
+
+        for lot in self.lots:
+            for term in costbasis.keys():
+                costbasis[term] += lot.costbasis[term]
+
+        return costbasis
+
+    def settle(self, event):
+        self.events.append(event)
+        self.bought, self.sold = event.settlement(self.bought, self.sold)
+
+        if type(event) is TransactionEvent and event.side == 'sell':
+            self.lots.append(Lot(self, event))
+
+
     def push(self, transaction):
         self._event_pool.append(transaction)
         self._event_pool.sort(key=lambda e: e.timestamp)
         e = None
         while e is not transaction:
             e = self._event_pool.pop(0)
-            self.events.append(e)
-            e.settle(self)
+            self.settle(e)
 
     @property
     def average(self):
@@ -436,14 +455,6 @@ class StockFIFO:
     @property
     def quantity(self):
         return self.events[-1].running
-
-    @property
-    def cost(self):
-        return sum([
-            e.price * e.unsettled
-            for e in self.transactions
-            if e.side == 'buy'
-        ])
 
     @property
     def equity(self):
@@ -651,9 +662,9 @@ class Account:
         self.data = self.cached('account', 'holdings')
         self.tickers = sorted(self.data.keys())
 
-        costbasis = self._get_costbasis()
         for ticker in self.tickers:
-            self.data[ticker].update(costbasis[ticker])
+            stock = self.get_stock(ticker)
+            self.data[ticker].update(stock.costbasis)
 
         positions = self._get_positions()
         dividends = self._get_dividends()
@@ -671,31 +682,12 @@ class Account:
             datum['activities'] = '\n'.join(positions['activities'].get(ticker, []))
             datum['pe_ratio'] = flt(fundamentals[ticker]['pe_ratio'])
             datum['pb_ratio'] = flt(fundamentals[ticker]['pb_ratio'])
-            datum['price'] = flt(prices[ticker])
+
             datum['marketcap'] = fifo.marketcap
+
+            datum['price'] = flt(prices[ticker])
             datum['50dma'] = fifo.stats['day50MovingAvg']
             datum['200dma'] = fifo.stats['day200MovingAvg']
-
-    def _get_costbasis(self):
-        #TODO: Add realized as well as unrealized for this data
-        costbasis = defaultdict(Counter)
-        for ticker, stock in self.stocks.items():
-            costbasis[ticker].update({
-                'cost':           stock.cost,
-                'cost_basis':     stock.gain,
-                'st_cb_qty':      0,
-                'st_cb_capgain':  0,
-                'lt_cb_qty':      0,
-                'lt_cb_capgain':  0,
-            })
-            for sell in stock.sells:
-                costbasis[ticker].update({
-                    'st_cb_qty':     sell.costbasis['st']['qty'],
-                    'st_cb_capgain': sell.costbasis['st']['gain'],
-                    'lt_cb_qty':     sell.costbasis['lt']['qty'],
-                    'lt_cb_capgain': sell.costbasis['lt']['gain'],
-                })
-        return costbasis
 
     def _get_dividends(self):
         dividends = defaultdict(list)
@@ -1037,7 +1029,7 @@ VIEWS = {
             'equity_change', 'percent_change',
             'cost_basis', 'growth',
             'premium_collected', 'dividends_collected',
-            'short', 'bucket', 'rank', 'since_close', 'since_open', 'alerts',
+            'short', 'bucket', 'rank', 'ma', 'since_close', 'since_open', 'alerts',
             'pe_ratio', 'pb_ratio', 'beta',
             'activities',
         ],
@@ -1105,21 +1097,20 @@ def tabulize(ctx, view, reverse, limit):
         alerts.append('%s/%sB' % (sizestr, mulla(marketcap)))
 
         if buy.term == 'st': alerts.append(colored('ST!', 'yellow'))
-
         if fifo.subject2washsale: alerts.append(colored('WS!', 'yellow'))
-
         if datum['pe_ratio'] < 10: alerts.append(colored('PE!', 'red'))
 
-        p = datum['price']
-
-        if p > datum['50dma'] > datum['200dma']:
-            alerts.append(colored('STRONG!', 'green'))
-        elif p < datum['50dma'] < datum['200dma']:
-            alerts.append(colored('CRASH!', 'red'))
-        else:
-            alerts.append(colored('WEAK!', 'yellow'))
-
         datum['alerts'] = ' '.join(alerts)
+
+
+        prices = (datum['200dma'], datum['50dma'], datum['price'])
+        score = reduce(lambda a,b:a*b, map((lambda n: n[0]/n[1]), map(sorted, zip(prices, sorted(prices)))))
+
+        p200, p50, p = prices
+        c = 'yellow'
+        if p > p50 > p200: c = 'green'
+        elif p < p50 < p200: c = 'red'
+        datum['ma'] = colored('%0.3f'%score, c)
 
         yesterday = fifo.yesterday
         yesterchange = yesterday['marketChangeOverTime']
