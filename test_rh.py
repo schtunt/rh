@@ -1,7 +1,9 @@
 import rh
 import pytest
 
-rh.CACHE_DIR='/tmp'
+from unittest.mock import patch
+
+rh.constants.CACHE_DIR='tests/data/'
 MOCKED_APIS = {
     'export:stocks': None,
     'stocks:splits': [{
@@ -110,7 +112,7 @@ MOCKED_APIS = {
         'ytdChangePercent': 0.03221326570660876
     },
     'stocks:instrument': 'AAPL',
-    'stocks:prices': ['135.000000'],
+    'stocks:prices': ['200.000000'],
     'stocks:marketcap': 0,
     'events:activities': [],
     'orders:stocks:open': [],
@@ -131,65 +133,106 @@ def initialize_function(session_mocker):
     session_mocker.patch.object(rh.Account, 'cached', cached)
 
 @pytest.fixture(scope='session')
-def account():
+@patch('rh.Account.connect')
+@patch('rh.iex')
+def account(_, __):
     account = rh.Account()
     account.slurp()
     return account
 
-@pytest.fixture
-def debug(account):
-    aapl = account.get_stock('AAPL')
-    for e in aapl.events:
-        print(e)
-
-@pytest.fixture(scope='function')
-def trades():
-    '''This must be 1:1 with test.csv'''
-    return [
-        (150,80), (100,90), (25,120), (25,130), (-150,150),
-        (14,140), (12,145), (6,150) ,(-150,220),
-        (202,200), (6,240), (10,350)
-    ]
-
-def test_account_general(account, trades):
-    aapl = account.get_stock('AAPL')
-    assert aapl.ticker == 'AAPL'
-
-def test_stock_pointer(account, trades):
-    aapl = account.get_stock('AAPL')
-    assert aapl.pointer == 4
-
-def test_stock_quantities_bought(account, trades):
+@patch('rh.Account.cached')
+def test_stock_states(stocks_prices, account):
     aapl = account.get_stock('AAPL')
 
-    # sum(filter(lambda t: t>0, map(lambda t: t[0], trades)))
-    # ( grep buy test.csv |cut -d, -f 6|paste -sd+ - | bc ) 2>/dev/null
-    assert aapl.bought == 550
+    # All events from the CSV, plus 1 stock-split event
+    assert aapl.pointer == 7
+    assert len(aapl._states) == 9 + 1
+    assert aapl.quantity == 1
 
-def test_stock_quantities_sold(account, trades):
+def test_stock_at_event_1(account):
     aapl = account.get_stock('AAPL')
 
-    # sum(filter(lambda t: t>0, map(lambda t: -t[0], trades)))
-    # ( grep sell test.csv |cut -d, -f 6|paste -sd+ - | bc ) 2>/dev/nul
-    assert aapl.sold == 300
+    state = aapl._states[0]
+    assert state['ptr'] == 0
+    assert state['events'] == 1
+    assert state['qty'] == 100
+    assert state['pps'] == 200 - 80
 
-def test_stock_quantities_traded(account, trades):
+def test_stock_at_event_2(account):
     aapl = account.get_stock('AAPL')
 
-    # sum(map(lambda t: abs(t[0]), trades))
-    # ( tail -n +2 test.csv |cut -d, -f 6|paste -sd+ - | bc ) 2>/dev/null
-    assert aapl.traded == 850
+    state = aapl._states[1]
+    assert state['ptr'] == 0
+    assert state['events'] == 2
+    assert state['qty'] == 200
+    assert state['pps'] == 200 - (80+90)/2
 
-def test_stock_quantities_held(account, trades):
+def test_stock_at_event_3(account):
     aapl = account.get_stock('AAPL')
 
-    # sum(map(lambda t: t[0], trades))
-    assert aapl.quantity == 250
+    state = aapl._states[2]
+    assert state['ptr'] == 0
+    assert state['events'] == 3
+    assert state['qty'] == 100
+    assert state['pps'] == 200
 
-#def test_stock_cost(account):
-#    aapl = account.get_stock('AAPL')
-#    assert aapl.cost == 34000
+def test_stock_at_event_4(account):
+    aapl = account.get_stock('AAPL')
 
-#def test_stock_equity(account):
-#    aapl = account.get_stock('AAPL')
-#    assert aapl.equity == 133600
+    state = aapl._states[3]
+    assert state['ptr'] == 1
+    assert state['events'] == 4
+    assert state['qty'] == 0
+
+def test_stock_at_event_5(account):
+    aapl = account.get_stock('AAPL')
+
+    state = aapl._states[4]
+    assert state['ptr'] == 1
+    assert state['events'] == 5
+    assert state['qty'] == 100
+
+def test_stock_at_event_6(account):
+    aapl = account.get_stock('AAPL')
+
+    state = aapl._states[5]
+    assert state['ptr'] == 4
+    assert state['events'] == 6
+    assert state['qty'] == 99
+
+def test_stock_at_event_7(account):
+    aapl = account.get_stock('AAPL')
+
+    state = aapl._states[6]
+    assert state['ptr'] == 4
+    assert state['events'] == 7
+    assert state['qty'] == 396
+
+def test_stock_at_event_8(account):
+    aapl = account.get_stock('AAPL')
+
+    state = aapl._states[7]
+    assert state['ptr'] == 4
+    assert state['events'] == 8
+    assert state['qty'] == 400
+
+def test_stock_at_event_9(account):
+    aapl = account.get_stock('AAPL')
+
+    state = aapl._states[8]
+    assert state['ptr'] == 4
+    assert state['events'] == 9
+    assert state['qty'] == 4
+
+def test_stock_at_event_10(account):
+    aapl = account.get_stock('AAPL')
+
+    for i in range(len(aapl.events)):
+        e = aapl.events[i]
+        s = aapl._states[i]
+        print(e, s)
+
+    state = aapl._states[9]
+    assert state['ptr'] == 7
+    assert state['events'] == 10
+    assert state['qty'] == 1
