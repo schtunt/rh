@@ -7,14 +7,11 @@ import math, hashlib, random
 from collections import defaultdict, namedtuple
 from functools import reduce
 
-import pytz
 from datetime import datetime, timedelta, timezone
-import datetime as dt
 
 import pathlib
 from pathlib import posixpath
 
-import dateutil.parser as dtp
 from collections import defaultdict
 
 import robin_stocks as rh
@@ -33,7 +30,8 @@ from beautifultable import BeautifulTable
 import __main__
 
 import constants
-import util, util.color
+import util
+import util.datetime as udt
 
 def fmt(f, d):
     def fn(k):
@@ -42,8 +40,6 @@ def fmt(f, d):
         except:
             raise RuntimeError(f'Invalid parameters for fmt; d={d.get(k, "N/A")}, k={k})')
     return fn
-
-now = lambda: pytz.UTC.localize(datetime.now())
 
 def conterm(fr, to):
     delta = to - fr
@@ -95,7 +91,7 @@ class TransactionEvent(Event):
         self.side = side
         self.quantity = util.flt(qty)
         self.price = util.flt(price)
-        self.timestamp = dtp.parse(timestamp)
+        self.timestamp = util.datetime.dtp.parse(timestamp)
         self.otype = otype
 
 
@@ -140,7 +136,7 @@ class StockSplitEvent(Event):
     def __init__(self, ticker, date, multiplier, divisor):
         super().__init__(ticker)
 
-        self.timestamp = pytz.UTC.localize(dtp.parse(date))
+        self.timestamp = util.datetime.parse(date)
         self.multiplier = util.flt(multiplier)
         self.divisor = util.flt(divisor)
 
@@ -186,11 +182,11 @@ class Lot:
         while required >= constants.ZERO:
             # Bad data from robinhood; workaround
             if stock.pointer == len(stock.events):
-                print("XXXXXXXXXXXXXXXXXXXXX")
-                stock.buys.append(
+                print("XXXXXXXXXXXXXXXXXXXXX", stock.ticker)
+                stock.events.append(
                     TransactionEvent(
                         stock.ticker,
-                        sell.unsettled,
+                        required,
                         0.00,
                         'buy',
                         str(datetime(2020, 1, 1, 0, 0, tzinfo=timezone.utc)),
@@ -361,7 +357,7 @@ class StockFIFO:
 
         assert current is not None
 
-        if (now() - current.timestamp) <= thirty: return True
+        if (util.datetime.now() - current.timestamp) <= thirty: return True
         if last and (current.timestamp - last.timestamp) > thirty: return False
         return True
 
@@ -429,11 +425,11 @@ class StockFIFO:
         if realized:
             for lot in self.lots:
                 for term in costbasis.keys():
-                    costbasis[term].update(lot.costbasis[term])
-                    assert(costbasis['long'])
+                    costbasis[term]['qty'] += lot.costbasis[term]['qty']
+                    costbasis[term]['value'] += lot.costbasis[term]['value']
         else:
             for buy in self.buys:
-                term = conterm(buy.timestamp, now())
+                term = conterm(buy.timestamp, util.datetime.now())
                 costbasis[term]['qty'] += buy.available
                 costbasis[term]['value'] += buy.available * (self.price - buy.price)
 
@@ -441,6 +437,9 @@ class StockFIFO:
 
     @property
     def pps(self):
+        '''
+        average cost per share based on entire history for this stock
+        '''
         realized = self.costbasis(realized=True)
         unrealized = self.costbasis(realized=False)
         aggregate = { 'value':0, 'qty': 0 }
@@ -476,10 +475,13 @@ class StockFIFO:
 
             # Lot(self, ...) moves self.pointer, so this block must come after it
             self._states.append({
+                'dts': transaction.timestamp,
                 'qty': self.quantity,
                 'ptr': self.pointer,
                 'pps': self.pps,
                 'events': len(self.events),
+                'cbr': self.costbasis(realized=True),
+                'cbu': self.costbasis(realized=False),
             })
 
 
@@ -591,7 +593,7 @@ class StockReader(CSVReader):
 #
 #    @property
 #    def timestamp(self):
-#        return dtp.parse('%sT15:00:00.000000Z' % self.get('expiration_date'))
+#        return util.datetime.dtp.parse('%sT15:00:00.000000Z' % self.get('expiration_date'))
 #
 #    @property
 #    def side(self):
@@ -896,11 +898,11 @@ class Account:
         ])
         cachefile = pathlib.Path(f'{constants.CACHE_DIR}/{uniqname}.pkl')
 
-        data, age, fresh, this_second = {}, -1, False, datetime.now()
+        data, age, fresh, this_second = {}, -1, False, util.datetime.now()
         while not fresh:
             data = self._pickled(cachefile, area, subarea, *args, **kwargs)
 
-            then = datetime.fromtimestamp(cachefile.lstat().st_mtime)
+            then = datetime.fromtimestamp(cachefile.lstat().st_mtime, tz=timezone.utc)
             age = this_second - then
 
             jitter = 1 + random.random()
