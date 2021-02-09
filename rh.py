@@ -64,54 +64,96 @@ def dump(heading, obj):
 class Event:
     ident = 0
 
-    mappings = {
-        'FCAU': 'STLA'
-    }
-    def __init__(self, ticker):
+    def __init__(self, stock):
         self.ident = Event.ident
         Event.ident += 1
 
-        self.running = 0
-        self.ticker = Event.mappings.get(ticker, ticker)
+        self.stock = stock
 
         self.connections = []
 
-    def connect(self, lc):
-        self.connections.append(lc)
+    @property
+    def ticker(self):
+        return self.stock.ticker
 
     @property
     def unsettled(self):
         return 0
 
+    def connect(self, lc):
+        self.connections.append(lc)
+
 
 class TransactionEvent(Event):
-    def __init__(self, ticker, qty, price, side, timestamp, otype):
-        super().__init__(ticker)
+    def __init__(self, stock, qty, price, side, timestamp, otype):
+        super().__init__(stock)
 
         self.side = side
-        self.quantity = util.flt(qty)
-        self.price = util.flt(price)
+        self._quantity = util.flt(qty)
+        self._price = util.flt(price)
         self.timestamp = util.datetime.dtp.parse(timestamp)
         self.otype = otype
 
+    def price(self, when=None):
+        price = self._price
+        if not when: return price
 
-    @property
-    def available(self):
+        for splitter in self.stock.splitters:
+            if self.timestamp <= splitter.timestamp <= when:
+                price = splitter.reverse(price)
+
+        return price
+
+    def quantity(self, when=None):
+        quantity = self._quantity
+        if not when: return quantity
+
+        for splitter in self.stock.splitters:
+            if self.timestamp <= splitter.timestamp <= when:
+                quantity = splitter.forward(quantity)
+
+        return quantity
+
+
+    def available(self, when=None):
         '''
-        of the total number of shares associated with this transaction, how many
-        have not yet been accounted for via a sell.
+        of the total number of shares associated with this transaction, how many have not yet
+        been accounted for via a sell.  furthermore, the time of the question itself needs to be
+        specified; for every stock split event that lies between this buy and the request date,
+        the stock split has to be invoked.
         '''
 
         assert self.side == 'buy'
-        return self.quantity - sum(lc.qty for lc in self.connections)
+
+        # Get availability at time of purchase (when=None)
+        available = self.quantity(when=None)
+
+        for lc in self.connections:
+            available -= lc.qty
+
+        if not when: return available
+
+        print("##################################", available)
+        for splitter in self.stock.splitters:
+            if self.timestamp <= splitter.timestamp <= when:
+                available = splitter.forward(available)
+                print(
+                    'QChanged; a:', available,
+                    'buy:', self.timestamp,
+                    'split:', splitter.timestamp,
+                    'request:', when
+                )
+        print("##################################")
+
+        return available
 
     def settle(self, stock):
         signum = lambda side: {'buy': +1, 'sell':-1}[side]
-        stock.quantity += signum(self.side) * self.quantity
+        stock._quantity += signum(self.side) * self._quantity
 
 
-    def __repr__(self):
-        return str((self.ticker, self.side, self.quantity, self.price, self.otype, len(self.connections)))
+    #def __repr__(self):
+        #return str((self.ticker, self.side, self.available(), self.quantity(), self.price(), self.otype, len(self.connections)))
         #q = util.color.qty(self.qty)
         #if len(self.ties) > 1:
         #    q = '%s (%s)' % (q, ', '.join([tie.portion(self) for tie in self.ties]))
@@ -133,8 +175,8 @@ class TransactionEvent(Event):
 
 
 class StockSplitEvent(Event):
-    def __init__(self, ticker, date, multiplier, divisor):
-        super().__init__(ticker)
+    def __init__(self, stock, date, multiplier, divisor):
+        super().__init__(stock)
 
         self.timestamp = util.datetime.parse(date)
         self.multiplier = util.flt(multiplier)
@@ -144,16 +186,13 @@ class StockSplitEvent(Event):
         rstr = '#%05d %s %s stock-split %s-for-%s @ %s' % (
             self.ident,
             self.ticker,
-            util.color.qty(self.running),
+            -1,
             util.color.qty(self.multiplier),
             util.color.qty(self.divisor),
             self.timestamp,
         )
 
         return '<StockSplitEvent  %s>' % rstr
-
-    def settle(self, stock):
-        stock.quantity = self.forward(stock.quantity)
 
     def forward(self, qty):
         qty *= self.multiplier
@@ -174,18 +213,18 @@ class Lot:
         sale or first investment in the stock.
         '''
         self.type = 'realized'
-        self.sell, self.qty = sell, sell.quantity
+        self.sell, self.qty = sell, sell.quantity()
         self.buys = []
 
         required = self.qty
         print("New sale, looking to sell %d stocks..." % required)
-        while required >= constants.ZERO:
+        while required > 0:
             # Bad data from robinhood; workaround
             if stock.pointer == len(stock.events):
                 print("XXXXXXXXXXXXXXXXXXXXX", stock.ticker)
                 stock.events.append(
                     TransactionEvent(
-                        stock.ticker,
+                        stock,
                         required,
                         0.00,
                         'buy',
@@ -199,22 +238,14 @@ class Lot:
             ))
             event = stock.events[stock.pointer]
             if type(event) is TransactionEvent:
-                if event.side == 'buy' and event.available > constants.ZERO:
-                    available = event.available
-                    if stock.splitter:
-                        available = stock.splitter.forward(available)
-                    print("   - found a buy with %d available stocks at index %d" % (
-                        available,
-                        stock.pointer,
-                    ))
+                if event.side == 'buy':
+                    available = event.available()
+                    if available <= 0:
+                        stock.pointer += 1
+                        continue
 
-                    lc = LotConnector(
-                        sell=self.sell,
-                        event=event,
-                        requesting=required,
-                        splitter=stock.splitter,
-                    )
-                    required -= lc.giving
+                    lc = LotConnector(sell=self.sell, buy=event, requesting=required)
+                    required -= lc.qty
                     self.buys.append(lc)
                     print("   - remaining requirement is now %d" % (required))
                 else:
@@ -259,29 +290,69 @@ class Lot:
         return costbasis
 
 class LotConnector:
-    def __init__(self, sell, event, requesting, splitter):
+    def __init__(self, sell, buy, requesting):
         self.sell  = sell
-        self.event = event
+        self.buy = buy
 
-        self.giving = requesting
-        self.taking = requesting
-
-        if splitter is not None:
-            self.taking = splitter.reverse(self.taking)
-
-        self.qty = min(self.taking, event.available)
+        self.qty = min(requesting, buy.available())
 
         # short-term or long-term sale (was the buy held over a year)
-        self.term = conterm(self.event.timestamp, self.sell.timestamp)
+        self.term = conterm(self.buy.timestamp, self.sell.timestamp)
 
-        self.event.connect(self)
+        self.buy.connect(self)
 
     @property
     def costbasis(self):
-        return (self.sell.price - self.event.price) * self.qty
+        return (self.sell.price() - self.buy.price()) * self.qty
 
 
 class StockFIFO:
+    mappings = {
+        'FCAU': 'STLA'
+    }
+
+    def __init__(self, account, ticker):
+        self.account = account
+        self.ticker = StockFIFO.mappings.get(ticker, ticker)
+
+        self.quantity = 0
+
+        self.pointer = 0
+        self.events = []
+
+        self._ledger = []
+
+        self.lots = []
+
+        # StockSplits - These splitters will act as identity functions, but take effect whenever
+        # the date of query and the date of a buy lie on different sides of the split date.  That
+        # means, that the buy event needs to know "who's asking", or more specifically,
+        # "when's asking?".
+        self.splitters = [
+            StockSplitEvent(
+                stock=self,
+                date=ss['exDate'],
+                divisor=ss['fromFactor'],
+                multiplier=ss['toFactor'],
+            ) for ss in self.account.cached('stocks', 'splits', self.ticker)
+        ]
+
+        self._event_pool = self.splitters + self._events()
+
+        self._iex = iex.Stock(self.ticker)
+
+
+    def __getitem__(self, i):
+        return self.events[i]
+
+    def __repr__(self):
+        return '<StockFIFO %s x %s @ mean unit cost of %s and current equity of %s>' % (
+            self.ticker,
+            util.color.qty(self.quantity),
+            util.color.mulla(self.pps),
+            util.color.mulla(self.price),
+        )
+
     @property
     def earnings(self):
         return self.account.cached('events', 'earnings', self.ticker)
@@ -300,7 +371,7 @@ class StockFIFO:
 
     @property
     def beta(self):
-        return self._iex_stock.get_beta()
+        return self._iex.get_beta()
 
     @property
     def ttm_eps(self):
@@ -361,23 +432,10 @@ class StockFIFO:
         if last and (current.timestamp - last.timestamp) > thirty: return False
         return True
 
-    def _splits(self):
-        return [
-            StockSplitEvent(
-                ticker=self.ticker,
-                #date=ss['exDate'],
-                #multiplier=ss.get('forfactor', 1),
-                #divisor=ss.get('tofactor', ss['ratio']),
-                date=ss['exDate'],
-                divisor=ss['fromFactor'],
-                multiplier=ss['toFactor'],
-            ) for ss in self.account.cached('stocks', 'splits', self.ticker)
-        ]
-
     def _events(self):
          return [
             TransactionEvent(
-                self.ticker,
+                self,
                 ec['quantity'],
                 ec['price'],
                 ec['side'],
@@ -387,39 +445,16 @@ class StockFIFO:
                 for ec in se['equity_components']
         ]
 
-    def __init__(self, account, ticker):
-        self.account = account
-        self.ticker = ticker
-
-        self.quantity = 0
-
-        self.pointer = 0
-        self.events = []
-
-        self.splitter = None
-
-        self._states = []
-
-        self.lots = []
-        self._event_pool = self._splits() + self._events()
-
-        self._iex_stock = iex.Stock(self.ticker)
-
-    def __getitem__(self, i):
-        return self.events[i]
-
-    def __repr__(self):
-        return '<StockFIFO %s x %s @ mean unit cost of %s and current equity of %s>' % (
-            self.ticker,
-            util.color.qty(self.quantity),
-            util.color.mulla(self.pps),
-            util.color.mulla(self.price),
-        )
-
     def costbasis(self, realized=True):
+        '''TODO
+        st cb qty -> ST Shs; realized [Andre Notes] ok – In my last email, I was expecting this
+        to be the unrealized amount, so that’s why my comment “I would expect that the difference
+        between the “equity” field and the total tax cost basis field(s) would equal the total of
+        the “st cb capgain” and the “lt cb capgain”.
+        '''
         costbasis = {
-            'short': { 'qty': 0, 'value': 0 },
-            'long':  { 'qty': 0, 'value': 0 },
+            'short': { 'qty': util.zero, 'value': util.zero },
+            'long':  { 'qty': util.zero, 'value': util.zero },
         }
 
         if realized:
@@ -428,29 +463,18 @@ class StockFIFO:
                     costbasis[term]['qty'] += lot.costbasis[term]['qty']
                     costbasis[term]['value'] += lot.costbasis[term]['value']
         else:
+            print("CB.start")
             for buy in self.buys:
-                term = conterm(buy.timestamp, util.datetime.now())
-                costbasis[term]['qty'] += buy.available
-                costbasis[term]['value'] += buy.available * (self.price - buy.price)
+                now = util.datetime.now()
+                term = conterm(buy.timestamp, now)
+                available = buy.available(when=now)
+                price = buy.price(when=now)
+                costbasis[term]['qty'] += available
+                costbasis[term]['value'] += available * (self.price - price)
+                print(" - q: %f" % costbasis[term]['qty'])
+            print("CB.end")
 
         return costbasis
-
-    @property
-    def pps(self):
-        '''
-        average cost per share based on entire history for this stock
-        '''
-        realized = self.costbasis(realized=True)
-        unrealized = self.costbasis(realized=False)
-        aggregate = { 'value':0, 'qty': 0 }
-        for costbasis in realized, unrealized:
-            for term in 'short', 'long':
-                for key in 'qty', 'value':
-                    aggregate[key] += unrealized[term][key]
-
-        return 0 if (
-            aggregate['qty'] < constants.ZERO
-        ) else aggregate['value'] / aggregate['qty']
 
     def push(self, transaction):
         self._event_pool.append(transaction)
@@ -459,30 +483,47 @@ class StockFIFO:
         while event is not transaction:
             event = self._event_pool.pop(0)
 
+            print("Q", self.quantity)
             if type(event) is TransactionEvent:
                 if event.side == 'sell':
                     lot = Lot(self, event)
                     self.lots.append(lot)
-                    self.quantity -= event.quantity
+                    self.quantity -= event.quantity()
                 else:
-                    self.quantity += event.quantity
+                    self.quantity += event.quantity()
             elif type(event) is StockSplitEvent:
-                print("SS event just happened")
-                self.splitter = event
-                self.quantity = self.splitter.forward(self.quantity)
+                print("SS")
+                self.quantity = event.forward(self.quantity)
 
             self.events.append(event)
 
             # Lot(self, ...) moves self.pointer, so this block must come after it
-            self._states.append({
+            self._ledger.append({
+                'events': len(self.events),
                 'dts': transaction.timestamp,
                 'qty': self.quantity,
                 'ptr': self.pointer,
                 'pps': self.pps,
-                'events': len(self.events),
                 'cbr': self.costbasis(realized=True),
                 'cbu': self.costbasis(realized=False),
             })
+
+    @property
+    def pps(self):
+        '''
+        average cost per share based on entire history for this stock
+        '''
+        realized = self.costbasis(realized=True)
+        unrealized = self.costbasis(realized=False)
+        aggregate = { 'value': util.zero, 'qty': util.zero }
+        for costbasis in realized, unrealized:
+            for term in 'short', 'long':
+                for key in 'qty', 'value':
+                    aggregate[key] += unrealized[term][key]
+
+        return 0 if (
+            aggregate['qty'] == util.zero
+        ) else aggregate['value'] / aggregate['qty']
 
 
     def summarize(self):
@@ -676,8 +717,8 @@ class Account:
 
     def slurp(self):
         for ticker, parameters in self.transactions():
-            transaction = TransactionEvent(ticker, *parameters)
-            stock = self.get_stock(transaction.ticker)
+            stock = self.get_stock(ticker)
+            transaction = TransactionEvent(stock, *parameters)
             stock.push(transaction)
 
         self.data = self.cached('account', 'holdings')
@@ -701,7 +742,7 @@ class Account:
             datum['ticker'] = ticker
             datum['premium_collected'] = positions['premiums'][ticker]
             datum['dividends_collected'] = sum([
-                float(div['amount']) for div in dividends[ticker]
+                util.flt(div['amount']) for div in dividends[ticker]
             ])
             datum['activities'] = '\n'.join(positions['activities'].get(ticker, []))
             datum['pe_ratio'] = util.flt(fundamentals[ticker]['pe_ratio'])
@@ -740,7 +781,7 @@ class Account:
         data = self.cached('options', 'positions:all')
 
         activities = defaultdict(list)
-        for option in [o for o in data if util.flt(o['quantity']) != 0]:
+        for option in [o for o in data if util.flt(o['quantity']) != util.zero]:
             ticker = option['chain_symbol']
 
             uri = option['option']
@@ -751,7 +792,7 @@ class Account:
             elif instrument['tradability'] == 'untradable':
                 raise
 
-            premium = 0
+            premium = util.zero 
             if instrument['state'] != 'queued':
                 #signum = -1 if option['type'] == 'short' else +1
                 premium -= util.flt(option['quantity']) * util.flt(option['average_price'])
@@ -760,13 +801,13 @@ class Account:
                 instrument['state'],
                 option['type'],
                 instrument['type'],
-                util.color.qty(option['quantity'], 0),
+                util.color.qty(option['quantity'], util.zero),
                 util.color.mulla(instrument['strike_price']),
                 instrument['expiration_date'],
                 util.color.mulla(premium),
             ))
 
-        premiums = defaultdict(lambda: 0)
+        premiums = defaultdict(lambda: util.zero)
         data = self.cached('orders', 'options:all')
         for option in [o for o in data if o['state'] not in ('cancelled', 'expired')]:
             ticker = option['chain_symbol']
@@ -785,7 +826,7 @@ class Account:
                 strategies.append('c[%s]' % ' '.join(tokens))
 
             legs = []
-            premium = 0
+            premium = util.zero 
             for leg in option['legs']:
                 uri = leg['option']
                 instrument = self.cached('stocks', 'instrument', uri)
@@ -811,7 +852,7 @@ class Account:
                 option['state'],
                 option['type'],
                 '/'.join(strategies),
-                util.color.qty(option['quantity'], 0),
+                util.color.qty(option['quantity'], util.zero),
                 util.color.mulla(premium),
                 util.color.mulla(instrument['strike_price']),
             ))
@@ -826,7 +867,7 @@ class Account:
             activities[ticker].append("%s %s x%s @%s" % (
                 order['type'],
                 order['side'],
-                util.color.qty(order['quantity'], 0),
+                util.color.qty(order['quantity'], util.zero),
                 util.color.mulla(order['price']),
             ))
 
@@ -1119,7 +1160,7 @@ def tabulize(ctx, view, reverse, limit):
                     sizestr = util.color.colored('M', 'blue')
             else: sizestr = util.color.colored('S', 'yellow')
         else:
-            marketcap, sizestr = 0, util.color.colored('?', 'red')
+            marketcap, sizestr = util.zero, util.color.colored('?', 'red')
         alerts.append('%s/%sB' % (sizestr, util.color.mulla(marketcap)))
 
         #if buy.term == 'st': alerts.append(util.color.colored('ST!', 'yellow'))
@@ -1141,12 +1182,12 @@ def tabulize(ctx, view, reverse, limit):
         yesterchange = yesterday['marketChangeOverTime']
 
         c = yesterday['close']
-        datum['since_close'] = (p - c) / c if c > 0 else 0
+        datum['since_close'] = (p - c) / c if c > util.zero else util.zero
 
         o = util.flt(fundamentals[ticker]['open'])
         datum['since_open'] = (p - o) / o
 
-        datum['growth'] = 0
+        datum['growth'] = util.zero
         #(
         #    sum((
         #        util.flt(datum['equity']),

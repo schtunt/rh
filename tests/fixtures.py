@@ -7,7 +7,7 @@ MOCKED_APIS = {
         'date': 1598832000000,
         'declaredDate': None,
         'description': 'Ordinary Shares',
-        'exDate': '2020-08-31',
+        'exDate': '2020-07-07',
         'fromFactor': 1,
         'id': 'SPLITS',
         'key': 'AAPL',

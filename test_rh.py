@@ -4,18 +4,27 @@ import pytest
 import unittest
 from datetime import datetime, timezone
 
+import util
 import tests.fixtures
 
-month2date = lambda m: datetime(2020, m, 1, 0, 0, tzinfo=timezone.utc)
-month2price = lambda m: [100, 110, 140, 155, 180, 210, 213, 216, 220, 280, 300, 800][m-1]
+prices = [
+    util.flt('100'),
+    util.flt('110'),
+    util.flt('140'),
+    util.flt('155'),
+    util.flt('180'),
+    util.flt('210'),
+    util.flt('60'),
+    util.flt('55'),
+    util.flt('61.6'),
+]
+month2price = lambda m: prices[m-1]
+month2date = lambda m: datetime(2020, m, 20, 0, 0, tzinfo=timezone.utc)
 
 CSV = '''\
 symbol,date,order_type,side,fees,quantity,average_price
-AAPL,2020-12-13T13:48:29.838000Z,limit,sell,0.00,3.0000000000,99.00000000
-AAPL,2020-11-11T13:12:29.618030Z,limit,sell,0.00,3.0000000000,99.00000000
-AAPL,2020-10-10T11:25:49.178100Z,limit,sell,0.00,396.00000000,75.00000000
-AAPL,2020-09-22T17:10:53.317000Z,market,buy,0.00,4.0000000000,55.00000000
-AAPL,2020-08-09T17:10:14.617000Z,market,buy,0.00,4.0000000000,55.00000000
+AAPL,2020-09-09T17:10:53.317000Z,market,buy,0.00,100.00000000,58.00000000
+AAPL,2020-08-08T17:10:14.617000Z,market,buy,0.00,4.0000000000,55.00000000
 # <Event 7: StockSplit 4:1>
 AAPL,2020-06-06T19:58:29.368490Z,limit,sell,0.00,1.0000000000,210.00000000
 AAPL,2020-05-05T16:16:08.700000Z,market,buy,0.00,100.00000000,180.00000000
@@ -35,10 +44,10 @@ def answers(month, price):
     answer = ANSWER_TEMPLATE.copy()
 
     answer.update([
-        { 'qty': 100, 'events':1,  'cusq': 100, 'cusv': 100 * (price-100)
-                                                                         },
-        { 'qty': 200, 'events':2,  'cusq': 200, 'cusv': 200 * (price-105)
-                                                                         },
+        { 'qty': 100, 'events':1,  'cusq': 100, 'cusv': 100 * (price-100),
+                                                                          },
+        { 'qty': 200, 'events':2,  'cusq': 200, 'cusv': 200 * (price-105),
+                                                                          },
         { 'qty': 100, 'events':3,  'cusq': 100, 'cusv': 100 * (price-110),
                                    'crsq': 100, 'crsv': 4000              },
         { 'qty':   0, 'events':4,
@@ -47,68 +56,15 @@ def answers(month, price):
           'ptr':   1,              'crsq': 200, 'crsv': 8500              },
         { 'qty':  99, 'events':6,  'cusq':  99, 'cusv':  99 * (price-180),
           'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty': 396, 'events':7,  'cusq':  99, 'cusv': 396 * (price-180),
+        { 'qty': 396, 'events':7,  'cusq': 396, 'cusv': 396 * (price-45),
           'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty': 400, 'events':8,  'cusq': 396, 'cusv': 396 * (price-180),
+        { 'qty': 400, 'events':8,  'cusq': 400, 'cusv': 400 * (price-util.flt('45.1')),
           'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty':   4, 'events':9,  'cusq': 396, 'cusv': 396 * (price-180),
+        { 'qty': 500, 'events':9,  'cusq': 500, 'cusv': 500 * (price-util.flt('47.68')),
           'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty': 396, 'events':10, 'cusq': 396, 'cusv': 396 * (price-180),
-          'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty': 396, 'events':11, 'cusq': 396, 'cusv': 396 * (price-180),
-          'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty': 396, 'events':12, 'cusq': 396, 'cusv': 396 * (price-180),
-          'ptr':   7,              'crsq': 201, 'crsv': 8530              },
     ][month-1])
 
     return answer
-
-#def test_stock_at_event_7(account):
-#    aapl = account.get_stock('AAPL')
-#
-#    state = aapl._states[6]
-#    assert state['ptr'] == 4
-#    assert state['events'] == 7
-#    assert state['qty'] == 396
-#
-#def test_stock_at_event_8(account):
-#    aapl = account.get_stock('AAPL')
-#
-#    state = aapl._states[7]
-#    assert state['ptr'] == 4
-#    assert state['events'] == 8
-#    assert state['qty'] == 400
-#
-#def test_stock_at_event_9(account):
-#    aapl = account.get_stock('AAPL')
-#
-#    state = aapl._states[8]
-#    assert state['ptr'] == 4
-#    assert state['events'] == 9
-#    assert state['qty'] == 4
-#
-#def test_stock_at_event_10(account):
-#    aapl = account.get_stock('AAPL')
-#
-#    for i in range(len(aapl.events)):
-#        e = aapl.events[i]
-#        s = aapl._states[i]
-#        print(e, s)
-#
-#    state = aapl._states[9]
-#    assert state['ptr'] == 7
-#    assert state['events'] == 10
-#    assert state['qty'] == 1
-#
-#def test_stock_states():
-#    account = rh.Account()
-#    account.slurp()
-#    aapl = account.get_stock('AAPL')
-#
-#    # All events from the CSV, plus 1 stock-split event
-#    assert aapl.pointer == 7
-#    assert len(aapl._states) == 9 + 1
-#    assert aapl.quantity == 1
 
 @pytest.fixture(scope='module', autouse=True)
 def module_mock_initialize(module_mocker):
@@ -118,7 +74,7 @@ def module_mock_initialize(module_mocker):
     with open('/tmp/stocks.csv', 'w') as fH:
         fH.write(CSV)
 
-@pytest.fixture(scope='function', params=range(1, 13))
+@pytest.fixture(scope='function', params=range(1, 1+len(prices)))
 def month(mocker, request):
     month = request.param
     mocker.patch.object(rh.util.datetime, 'now', lambda: month2date(month))
@@ -137,23 +93,25 @@ def mkstonk(ticker):
     return aapl
 
 def test_stock(month, price):
+    #if month != 7: return
+
     aapl = mkstonk('AAPL')
-    state = aapl._states[month-1]
+    ledger = aapl._ledger[month-1]
     answer = answers(month, price)
 
-    assert state['ptr'] == answer['ptr']
-    assert state['events'] == answer['events']
-    assert state['qty'] == answer['qty']
+    assert ledger['ptr'] == answer['ptr']
+    assert ledger['events'] == answer['events']
+    assert ledger['qty'] == answer['qty']
 
-    assert state['cbr']['short']['qty']   == answer['crsq']
-    assert state['cbr']['short']['value'] == answer['crsv']
-    assert state['cbr']['long']['qty']    == answer['crlq']
-    assert state['cbr']['long']['value']  == answer['crlv']
+    assert ledger['cbr']['short']['qty']   == answer['crsq']
+    assert ledger['cbr']['short']['value'] == answer['crsv']
+    assert ledger['cbr']['long']['qty']    == answer['crlq']
+    assert ledger['cbr']['long']['value']  == answer['crlv']
 
-    assert state['cbu']['short']['qty']   == answer['cusq']
-    assert state['cbu']['short']['value'] == answer['cusv']
-    assert state['cbu']['long']['qty']    == answer['culq']
-    assert state['cbu']['long']['value']  == answer['culv']
+    assert ledger['cbu']['short']['qty']   == answer['cusq']
+    assert ledger['cbu']['short']['value'] == answer['cusv']
+    assert ledger['cbu']['long']['qty']    == answer['culq']
+    assert ledger['cbu']['long']['value']  == answer['culv']
 
 
 
