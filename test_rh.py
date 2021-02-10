@@ -35,7 +35,7 @@ AAPL,2020-01-01T19:58:29.368490Z,market,buy,0.00,100.00000000,100.00000000
 '''
 
 ANSWER_TEMPLATE = {
-    'ptr':0, 'events':0, 'qty':0,
+    'ptr':0, 'cnt':0, 'qty':0,
     'crsq': 0, 'crsv': 0, 'crlq':0, 'crlv':0,
     'cusq': 0, 'cusv': 0, 'culq':0, 'culv':0,
 }
@@ -44,24 +44,24 @@ def answers(month, price):
     answer = ANSWER_TEMPLATE.copy()
 
     answer.update([
-        { 'qty': 100, 'events':1,  'cusq': 100, 'cusv': 100 * (price-100),
-                                                                          },
-        { 'qty': 200, 'events':2,  'cusq': 200, 'cusv': 200 * (price-105),
-                                                                          },
-        { 'qty': 100, 'events':3,  'cusq': 100, 'cusv': 100 * (price-110),
-                                   'crsq': 100, 'crsv': 4000              },
-        { 'qty':   0, 'events':4,
-          'ptr':   1,              'crsq': 200, 'crsv': 8500              },
-        { 'qty': 100, 'events':5,  'cusq': 100, 'cusv': 100 * (price-180),
-          'ptr':   1,              'crsq': 200, 'crsv': 8500              },
-        { 'qty':  99, 'events':6,  'cusq':  99, 'cusv':  99 * (price-180),
-          'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty': 396, 'events':7,  'cusq': 396, 'cusv': 396 * (price-45),
-          'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty': 400, 'events':8,  'cusq': 400, 'cusv': 400 * (price-util.flt('45.1')),
-          'ptr':   4,              'crsq': 201, 'crsv': 8530              },
-        { 'qty': 500, 'events':9,  'cusq': 500, 'cusv': 500 * (price-util.flt('47.68')),
-          'ptr':   4,              'crsq': 201, 'crsv': 8530              },
+        { 'qty': 100, 'cnt':1,  'cusq': 100, 'cusv': 100 * (price-100),
+                                                                       },
+        { 'qty': 200, 'cnt':2,  'cusq': 200, 'cusv': 200 * (price-105),
+                                                                       },
+        { 'qty': 100, 'cnt':3,  'cusq': 100, 'cusv': 100 * (price-110),
+                                'crsq': 100, 'crsv': 4000              },
+        { 'qty':   0, 'cnt':4,
+          'ptr':   1,           'crsq': 200, 'crsv': 8500              },
+        { 'qty': 100, 'cnt':5,  'cusq': 100, 'cusv': 100 * (price-180),
+          'ptr':   1,           'crsq': 200, 'crsv': 8500              },
+        { 'qty':  99, 'cnt':6,  'cusq':  99, 'cusv':  99 * (price-180),
+          'ptr':   4,           'crsq': 201, 'crsv': 8530              },
+        { 'qty': 396, 'cnt':7,  'cusq': 396, 'cusv': 396 * (price-45),
+          'ptr':   4,           'crsq': 201, 'crsv': 8530              },
+        { 'qty': 400, 'cnt':8,  'cusq': 400, 'cusv': 400 * (price-util.flt('45.1')),
+          'ptr':   4,           'crsq': 201, 'crsv': 8530              },
+        { 'qty': 500, 'cnt':9,  'cusq': 500, 'cusv': 500 * (price-util.flt('47.68')),
+          'ptr':   4,           'crsq': 201, 'crsv': 8530              },
     ][month-1])
 
     return answer
@@ -86,33 +86,22 @@ def price(mocker, month):
     mocker.patch.object(rh.Account, 'cached', tests.fixtures.cached)
     return month2price(month)
 
+@pytest.fixture(scope='function', params=ANSWER_TEMPLATE.keys())
+def key(request):
+    return request.param
+
+
 def mkstonk(ticker):
     account = rh.Account()
     account.slurp()
     aapl = account.get_stock(ticker)
     return aapl
 
-def test_stock(month, price):
+def test_stock(month, price, key):
     #if month != 7: return
 
     aapl = mkstonk('AAPL')
     ledger = aapl._ledger[month-1]
     answer = answers(month, price)
 
-    assert ledger['ptr'] == answer['ptr']
-    assert ledger['events'] == answer['events']
-    assert ledger['qty'] == answer['qty']
-
-    assert ledger['cbr']['short']['qty']   == answer['crsq']
-    assert ledger['cbr']['short']['value'] == answer['crsv']
-    assert ledger['cbr']['long']['qty']    == answer['crlq']
-    assert ledger['cbr']['long']['value']  == answer['crlv']
-
-    assert ledger['cbu']['short']['qty']   == answer['cusq']
-    assert ledger['cbu']['short']['value'] == answer['cusv']
-    assert ledger['cbu']['long']['qty']    == answer['culq']
-    assert ledger['cbu']['long']['value']  == answer['culv']
-
-
-
-
+    assert ledger[key] == answer[key]

@@ -133,17 +133,9 @@ class TransactionEvent(Event):
 
         if not when: return available
 
-        print("##################################", available)
         for splitter in self.stock.splitters:
             if self.timestamp <= splitter.timestamp <= when:
                 available = splitter.forward(available)
-                print(
-                    'QChanged; a:', available,
-                    'buy:', self.timestamp,
-                    'split:', splitter.timestamp,
-                    'request:', when
-                )
-        print("##################################")
 
         return available
 
@@ -463,7 +455,6 @@ class StockFIFO:
                     costbasis[term]['qty'] += lot.costbasis[term]['qty']
                     costbasis[term]['value'] += lot.costbasis[term]['value']
         else:
-            print("CB.start")
             for buy in self.buys:
                 now = util.datetime.now()
                 term = conterm(buy.timestamp, now)
@@ -471,8 +462,6 @@ class StockFIFO:
                 price = buy.price(when=now)
                 costbasis[term]['qty'] += available
                 costbasis[term]['value'] += available * (self.price - price)
-                print(" - q: %f" % costbasis[term]['qty'])
-            print("CB.end")
 
         return costbasis
 
@@ -483,7 +472,6 @@ class StockFIFO:
         while event is not transaction:
             event = self._event_pool.pop(0)
 
-            print("Q", self.quantity)
             if type(event) is TransactionEvent:
                 if event.side == 'sell':
                     lot = Lot(self, event)
@@ -492,20 +480,27 @@ class StockFIFO:
                 else:
                     self.quantity += event.quantity()
             elif type(event) is StockSplitEvent:
-                print("SS")
                 self.quantity = event.forward(self.quantity)
 
             self.events.append(event)
 
-            # Lot(self, ...) moves self.pointer, so this block must come after it
+            # Ledger for unit-testing
+            cbr = self.costbasis(realized=True)
+            cbu = self.costbasis(realized=False)
             self._ledger.append({
-                'events': len(self.events),
-                'dts': transaction.timestamp,
-                'qty': self.quantity,
-                'ptr': self.pointer,
-                'pps': self.pps,
-                'cbr': self.costbasis(realized=True),
-                'cbu': self.costbasis(realized=False),
+                'cnt':  len(self.events),
+                'dts':  transaction.timestamp,
+                'qty':  self.quantity,
+                'ptr':  self.pointer,
+                'pps':  self.pps,
+                'crsq': cbr['short']['qty'],
+                'crsv': cbr['short']['value'],
+                'crlq': cbr['long']['qty'],
+                'crlv': cbr['long']['value'],
+                'cusq': cbu['short']['qty'],
+                'cusv': cbu['short']['value'],
+                'culq': cbu['long']['qty'],
+                'culv': cbu['long']['value'],
             })
 
     @property
@@ -1228,8 +1223,10 @@ def tabulize(ctx, view, reverse, limit):
             'totalchange':      (10, normalize(-totalchange, 0.25)),
             'growth':           (10, normalize(datum['growth'], 1)),
         }
+
         if ticker in DEBUG:
             print(dump('scores', scores))
+
         datum['rank'] = sum([pct * min(100, score) for (pct, score) in scores.values()])
 
     #if DEBUG:
