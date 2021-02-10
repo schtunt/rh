@@ -19,10 +19,6 @@ import yahoo_earnings_calendar as yec
 import iexfinance.stocks as iex
 import polygon
 
-from pygments import highlight
-from pygments.lexers import PythonLexer
-from pygments.formatters import Terminal256Formatter
-
 from pprint import pformat
 
 from beautifultable import BeautifulTable
@@ -30,8 +26,10 @@ from beautifultable import BeautifulTable
 import __main__
 
 import constants
+from constants import ZERO as Z
+
 import util
-import util.datetime as udt
+from util import dec as D
 
 def fmt(f, d):
     def fn(k):
@@ -44,22 +42,6 @@ def fmt(f, d):
 def conterm(fr, to):
     delta = to - fr
     return 'short' if delta <= timedelta(days=365, seconds=0) else 'long'
-
-if len(sys.argv) > 0:
-    CACHE_DIR=posixpath.join(
-        posixpath.dirname(sys.argv[0]),
-        '.cached',
-    )
-    if not posixpath.exists(constants.CACHE_DIR):
-        os.mkdir(constants.CACHE_DIR)
-
-
-def dump(heading, obj):
-    return '%s\n%s' % (
-        heading,
-        highlight((json.dumps(obj, indent=4)), PythonLexer(), Terminal256Formatter()),
-    )
-
 
 class Event:
     ident = 0
@@ -89,8 +71,8 @@ class TransactionEvent(Event):
         super().__init__(stock)
 
         self.side = side
-        self._quantity = util.flt(qty)
-        self._price = util.flt(price)
+        self._quantity = D(qty)
+        self._price = D(price)
         self.timestamp = util.datetime.dtp.parse(timestamp)
         self.otype = otype
 
@@ -171,8 +153,8 @@ class StockSplitEvent(Event):
         super().__init__(stock)
 
         self.timestamp = util.datetime.parse(date)
-        self.multiplier = util.flt(multiplier)
-        self.divisor = util.flt(divisor)
+        self.multiplier = D(multiplier)
+        self.divisor = D(divisor)
 
     def __repr__(self):
         rstr = '#%05d %s %s stock-split %s-for-%s @ %s' % (
@@ -209,11 +191,9 @@ class Lot:
         self.buys = []
 
         required = self.qty
-        print("New sale, looking to sell %d stocks..." % required)
         while required > 0:
             # Bad data from robinhood; workaround
             if stock.pointer == len(stock.events):
-                print("XXXXXXXXXXXXXXXXXXXXX", stock.ticker)
                 stock.events.append(
                     TransactionEvent(
                         stock,
@@ -225,9 +205,6 @@ class Lot:
                     )
                 )
 
-            print(" - still need %d of %d so far, and at index %d..." % (
-                required, self.qty, stock.pointer
-            ))
             event = stock.events[stock.pointer]
             if type(event) is TransactionEvent:
                 if event.side == 'buy':
@@ -239,18 +216,12 @@ class Lot:
                     lc = LotConnector(sell=self.sell, buy=event, requesting=required)
                     required -= lc.qty
                     self.buys.append(lc)
-                    print("   - remaining requirement is now %d" % (required))
                 else:
                     stock.pointer += 1
-                    print("   - this transaction event is useless, moving on to index %d" % stock.pointer)
             elif type(event) is StockSplitEvent:
-                assert stock.splitter is event
-                stock.splitter = None
                 stock.pointer += 1
             else:
                 raise
-
-        print("DONE\n\n")
 
     def bought(self):
         return {
@@ -375,12 +346,12 @@ class StockFIFO:
 
     @property
     def price(self):
-        return util.flt(self.account.cached('stocks', 'prices', self.ticker)[0])
+        return D(self.account.cached('stocks', 'prices', self.ticker)[0])
 
     @property
     def robinhood_id(self):
         '''Map ticker to robinhood id'''
-        return self.account.cached('stocks', 'instruments', self.ticker, info='id').pop(0)
+        return self.account.cached('stocks', 'instruments', self.ticker, info='id')[0]
 
     @property
     def timestamp(self):
@@ -445,8 +416,8 @@ class StockFIFO:
         the “st cb capgain” and the “lt cb capgain”.
         '''
         costbasis = {
-            'short': { 'qty': util.zero, 'value': util.zero },
-            'long':  { 'qty': util.zero, 'value': util.zero },
+            'short': { 'qty': Z, 'value': Z },
+            'long':  { 'qty': Z, 'value': Z },
         }
 
         if realized:
@@ -510,14 +481,14 @@ class StockFIFO:
         '''
         realized = self.costbasis(realized=True)
         unrealized = self.costbasis(realized=False)
-        aggregate = { 'value': util.zero, 'qty': util.zero }
+        aggregate = { 'value': Z, 'qty': Z }
         for costbasis in realized, unrealized:
             for term in 'short', 'long':
                 for key in 'qty', 'value':
                     aggregate[key] += unrealized[term][key]
 
         return 0 if (
-            aggregate['qty'] == util.zero
+            aggregate['qty'] == Z
         ) else aggregate['value'] / aggregate['qty']
 
 
@@ -614,8 +585,8 @@ class StockReader(CSVReader):
     @property
     def parameters(self):
         return (
-            util.flt(self.get('quantity')),
-            util.flt(self.get('average_price')),
+            D(self.get('quantity')),
+            D(self.get('average_price')),
             self.side,
             self.timestamp,
             self.otype,
@@ -655,8 +626,8 @@ class StockReader(CSVReader):
 #    @property
 #    def parameters(self):
 #        return (
-#            100 * util.flt(self.get('processed_quantity')),
-#            util.flt(self.get('strike_price')),
+#            100 * D(self.get('processed_quantity')),
+#            D(self.get('strike_price')),
 #            self.side,
 #            self.timestamp,
 #            '%s %s' % (self.side, self.otype,)
@@ -737,17 +708,17 @@ class Account:
             datum['ticker'] = ticker
             datum['premium_collected'] = positions['premiums'][ticker]
             datum['dividends_collected'] = sum([
-                util.flt(div['amount']) for div in dividends[ticker]
+                D(div['amount']) for div in dividends[ticker]
             ])
             datum['activities'] = '\n'.join(positions['activities'].get(ticker, []))
-            datum['pe_ratio'] = util.flt(fundamentals[ticker]['pe_ratio'])
-            datum['pb_ratio'] = util.flt(fundamentals[ticker]['pb_ratio'])
+            datum['pe_ratio'] = D(fundamentals[ticker]['pe_ratio'])
+            datum['pb_ratio'] = D(fundamentals[ticker]['pb_ratio'])
 
             datum['marketcap'] = fifo.marketcap
 
-            datum['price'] = util.flt(prices[ticker])
-            datum['50dma'] = fifo.stats['day50MovingAvg']
-            datum['200dma'] = fifo.stats['day200MovingAvg']
+            datum['price'] = D(prices[ticker])
+            datum['50dma'] = D(fifo.stats['day50MovingAvg'])
+            datum['200dma'] = D(fifo.stats['day200MovingAvg'])
 
     def _get_dividends(self):
         dividends = defaultdict(list)
@@ -759,24 +730,16 @@ class Account:
         return dividends
 
     def _get_fundamentals(self):
-        return dict(
-            zip(
-                self.tickers,
-                self.cached('stocks', 'fundamentals', self.tickers)
-            )
-        )
+        return dict(zip(self.tickers, self.cached('stocks', 'fundamentals', self.tickers)))
 
     def _get_prices(self):
-        return dict(zip(
-            self.tickers,
-            self.cached('stocks', 'prices', self.tickers)
-        ))
+        return dict(zip(self.tickers, self.cached('stocks', 'prices', self.tickers)))
 
     def _get_positions(self):
         data = self.cached('options', 'positions:all')
 
         activities = defaultdict(list)
-        for option in [o for o in data if util.flt(o['quantity']) != util.zero]:
+        for option in [o for o in data if D(o['quantity']) != Z]:
             ticker = option['chain_symbol']
 
             uri = option['option']
@@ -787,22 +750,22 @@ class Account:
             elif instrument['tradability'] == 'untradable':
                 raise
 
-            premium = util.zero 
+            premium = Z
             if instrument['state'] != 'queued':
                 #signum = -1 if option['type'] == 'short' else +1
-                premium -= util.flt(option['quantity']) * util.flt(option['average_price'])
+                premium -= D(option['quantity']) * D(option['average_price'])
 
             activities[ticker].append("%s %s %s x%s K=%s X=%s P=%s" % (
                 instrument['state'],
                 option['type'],
                 instrument['type'],
-                util.color.qty(option['quantity'], util.zero),
+                util.color.qty(option['quantity'], Z),
                 util.color.mulla(instrument['strike_price']),
                 instrument['expiration_date'],
                 util.color.mulla(premium),
             ))
 
-        premiums = defaultdict(lambda: util.zero)
+        premiums = defaultdict(lambda: Z)
         data = self.cached('orders', 'options:all')
         for option in [o for o in data if o['state'] not in ('cancelled', 'expired')]:
             ticker = option['chain_symbol']
@@ -821,7 +784,7 @@ class Account:
                 strategies.append('c[%s]' % ' '.join(tokens))
 
             legs = []
-            premium = util.zero 
+            premium = Z 
             for leg in option['legs']:
                 uri = leg['option']
                 instrument = self.cached('stocks', 'instrument', uri)
@@ -837,7 +800,7 @@ class Account:
                 ))
 
                 premium += sum([
-                    100 * util.flt(x['price']) * util.flt(x['quantity']) for x in leg['executions']
+                    100 * D(x['price']) * D(x['quantity']) for x in leg['executions']
                 ])
 
             premium *= -1 if option['direction'] == 'debit' else +1
@@ -847,7 +810,7 @@ class Account:
                 option['state'],
                 option['type'],
                 '/'.join(strategies),
-                util.color.qty(option['quantity'], util.zero),
+                util.color.qty(option['quantity'], Z),
                 util.color.mulla(premium),
                 util.color.mulla(instrument['strike_price']),
             ))
@@ -862,7 +825,7 @@ class Account:
             activities[ticker].append("%s %s x%s @%s" % (
                 order['type'],
                 order['side'],
-                util.color.qty(order['quantity'], util.zero),
+                util.color.qty(order['quantity'], Z),
                 util.color.mulla(order['price']),
             ))
 
@@ -881,7 +844,7 @@ class Account:
         return ROBIN_STOCKS_API[area][subarea](*args)
 
     def human(self, area, subarea, *args):
-        return dump(f'{area}:{subarea}', self._machine(area, subarea, *args))
+        return util.dump(f'{area}:{subarea}', self._machine(area, subarea, *args))
 
     @connected
     def _pickled(self, cachefile, area, subarea, *args, **kwargs):
@@ -919,6 +882,7 @@ class Account:
             ))
 
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                print(tmp.name)
                 pickle.dump(data, tmp)
                 tmp.flush()
                 os.rename(tmp.name, cachefile)
@@ -970,7 +934,6 @@ ROBIN_STOCKS_API = {
         'quote'       : IEXFinanceEndpoint(7200,  'get_quote'),
         'quotes'      : RobinStocksEndpoint(7200,  rh.stocks.get_quotes),
         'ratings'     : RobinStocksEndpoint(7200,  rh.stocks.get_ratings),
-       #'splits'      : PolygonEndpoint(-1, 'reference_stock_splits'),
         'splits'      : IEXFinanceEndpoint(86400,  'get_splits'),
         'yesterday'   : IEXFinanceEndpoint(21600,  'get_previous_day_prices'),
         'marketcap'   : IEXFinanceEndpoint(86400,  'get_market_cap'),
@@ -1023,7 +986,7 @@ def dprint(data, title=None):
 
     title = '%s(%d entries)' % (f'{title} ' if title else '', len(data))
     print(
-        dump(
+        util.dump(
             f'[DEBUG:%s]-=[ %s ]=-' % (
                 ','.join(DEBUG),
                 title
@@ -1155,12 +1118,12 @@ def tabulize(ctx, view, reverse, limit):
                     sizestr = util.color.colored('M', 'blue')
             else: sizestr = util.color.colored('S', 'yellow')
         else:
-            marketcap, sizestr = util.zero, util.color.colored('?', 'red')
+            marketcap, sizestr = Z, util.color.colored('?', 'red')
         alerts.append('%s/%sB' % (sizestr, util.color.mulla(marketcap)))
 
         #if buy.term == 'st': alerts.append(util.color.colored('ST!', 'yellow'))
         if fifo.subject2washsale: alerts.append(util.color.colored('WS!', 'yellow'))
-        if datum['pe_ratio'] < 10: alerts.append(util.color.colored('PE!', 'red'))
+        if datum['pe_ratio'].is_nan() or datum['pe_ratio'] < 10: alerts.append(util.color.colored('PE!', 'red'))
 
         datum['alerts'] = ' '.join(alerts)
 
@@ -1174,38 +1137,37 @@ def tabulize(ctx, view, reverse, limit):
         datum['ma'] = util.color.colored('%0.3f'%score, c)
 
         yesterday = fifo.yesterday
-        yesterchange = yesterday['marketChangeOverTime']
 
-        c = yesterday['close']
-        datum['since_close'] = (p - c) / c if c > util.zero else util.zero
+        c = D(yesterday['close'])
+        datum['since_close'] = (p - c) / c if c > Z else Z
 
-        o = util.flt(fundamentals[ticker]['open'])
+        o = D(fundamentals[ticker]['open'])
         datum['since_open'] = (p - o) / o
 
-        datum['growth'] = util.zero
+        datum['growth'] = Z
         #(
         #    sum((
-        #        util.flt(datum['equity']),
-        #        util.flt(datum['dividends_collected']),
-        #        util.flt(datum['premium_collected']),
-        #    )) / util.flt(datum['cost']) - 1
+        #        D(datum['equity']),
+        #        D(datum['dividends_collected']),
+        #        D(datum['premium_collected']),
+        #    )) / D(datum['cost']) - 1
         #)
 
-        #l = util.flt(fundamentals[ticker]['low_52_weeks'])
-        #h = util.flt(fundamentals[ticker]['high_52_weeks'])
+        #l = D(fundamentals[ticker]['low_52_weeks'])
+        #h = D(fundamentals[ticker]['high_52_weeks'])
         #datum['year'] = 100 * (p - l) / h
 
-        eq = util.flt(datum['equity'])
+        eq = D(datum['equity'])
         datum['bucket'] = 0
         datum['short'] = 0
-        distance = 0.1
+        distance = D('0.1')
         for i, b in enumerate([s * 1000 for s in buckets[1:]]):
             l, h = eq*(1-distance), eq*(1+distance)
             if l < b < h:
-                if p < 25: round_to = 1
-                elif p < 100: round_to = 0.5
-                elif p < 1000: round_to = 0.2
-                else: round_to = .1
+                if p < 25: round_to = D('1')
+                elif p < 100: round_to = D('0.5')
+                elif p < 1000: round_to = D('0.2')
+                else: round_to = D('.1')
                 datum['bucket'] = b//1000
                 datum['short'] = util.rnd((eq - b) / datum['price'], round_to)
                 break
@@ -1213,19 +1175,20 @@ def tabulize(ctx, view, reverse, limit):
         # Maps [-100/x .. +100/x] to [0 .. 100]
         normalize = lambda p, x: (p*x+1)/2
 
-        totalchange = util.flt(datum['percent_change'])/100
-        eq = util.flt(datum['equity'])
+        yesterchange = D(yesterday['marketChangeOverTime'])
+        totalchange = D(datum['percent_change'])/100
+        eq = D(datum['equity'])
         scores = {
-            'yesterchange':     (25, normalize(yesterchange, 4)),
-            'since_close':      (25, normalize(datum['since_close'], 4)),
-            'since_open':       (15, normalize(datum['since_open'], 4)),
+            'yesterchange':     (25, normalize(yesterchange, D('4'))),
+            'since_close':      (25, normalize(datum['since_close'], D('4'))),
+            'since_open':       (15, normalize(datum['since_open'], D('4'))),
             'bucket':           (15, normalize((eq/1000 - datum['bucket'])/13, 1) if datum['bucket'] > 0 else 1),
-            'totalchange':      (10, normalize(-totalchange, 0.25)),
-            'growth':           (10, normalize(datum['growth'], 1)),
+            'totalchange':      (10, normalize(-totalchange, D('0.25'))),
+            'growth':           (10, normalize(datum['growth'], D('1'))),
         }
 
         if ticker in DEBUG:
-            print(dump('scores', scores))
+            print(util.dump('scores', scores))
 
         datum['rank'] = sum([pct * min(100, score) for (pct, score) in scores.values()])
 
@@ -1298,9 +1261,12 @@ def history(ctx):
         if len(DEBUG) > 0 and ticker not in DEBUG: continue
         stock.summarize()
 
-def preinitialize():
+def preinitialize(repl=False):
     locale.setlocale(locale.LC_ALL, '')
     rh.helper.set_output(open(os.devnull,"w"))
+
+    if not posixpath.exists(constants.CACHE_DIR):
+        os.mkdir(constants.CACHE_DIR)
 
 acc = None
 if __name__ == '__main__':
@@ -1310,7 +1276,7 @@ elif not hasattr(__main__, '__file__'):
     print("Interactive Execution Mode Detected")
 
     print("Pre-Initializing REPL Environment...")
-    preinitialize()
+    preinitialize(repl=True)
 
     print("Initializing REPL Environment...")
     module = sys.modules[__name__]

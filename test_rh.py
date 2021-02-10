@@ -5,18 +5,19 @@ import unittest
 from datetime import datetime, timezone
 
 import util
+from util import dec as D
 import tests.fixtures
 
 prices = [
-    util.flt('100'),
-    util.flt('110'),
-    util.flt('140'),
-    util.flt('155'),
-    util.flt('180'),
-    util.flt('210'),
-    util.flt('60'),
-    util.flt('55'),
-    util.flt('61.6'),
+    D('100'),
+    D('110'),
+    D('140'),
+    D('155'),
+    D('180'),
+    D('210'),
+    D('60'),
+    D('55'),
+    D('61.6'),
 ]
 month2price = lambda m: prices[m-1]
 month2date = lambda m: datetime(2020, m, 20, 0, 0, tzinfo=timezone.utc)
@@ -58,9 +59,9 @@ def answers(month, price):
           'ptr':   4,           'crsq': 201, 'crsv': 8530              },
         { 'qty': 396, 'cnt':7,  'cusq': 396, 'cusv': 396 * (price-45),
           'ptr':   4,           'crsq': 201, 'crsv': 8530              },
-        { 'qty': 400, 'cnt':8,  'cusq': 400, 'cusv': 400 * (price-util.flt('45.1')),
+        { 'qty': 400, 'cnt':8,  'cusq': 400, 'cusv': 400 * (price-D('45.1')),
           'ptr':   4,           'crsq': 201, 'crsv': 8530              },
-        { 'qty': 500, 'cnt':9,  'cusq': 500, 'cusv': 500 * (price-util.flt('47.68')),
+        { 'qty': 500, 'cnt':9,  'cusq': 500, 'cusv': 500 * (price-D('47.68')),
           'ptr':   4,           'crsq': 201, 'crsv': 8530              },
     ][month-1])
 
