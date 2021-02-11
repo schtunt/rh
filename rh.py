@@ -364,7 +364,7 @@ class StockFIFO:
                 'culv': cbu['long']['value'],
             })
 
-    def epst(self, when=None):
+    def epst(self, when=None, dividends=False, premiums=False):
         '''
         On average, how much has each stock earned *you* the investor, per share ever traded,
         after taking into account everything that has happened to stocks held by you - capital
@@ -389,6 +389,13 @@ class StockFIFO:
             for term in ('short', 'long'):
                 value += costbasis[term]['value']
                 qty += costbasis[term]['qty']
+
+        if dividends:
+            divs = self.account._get_dividends()[self.ticker]
+            value += sum(D(div['amount']) for div in divs)
+
+        if premiums:
+            value += self.account._get_positions()['premiums'][self.ticker]
 
         return value / qty if qty > 0 else 0
 
@@ -1031,8 +1038,8 @@ def tabulize(ctx, view, reverse, limit):
         datum['crlq'] = cbr['long']['qty']
         datum['crlv'] = cbr['long']['value']
 
-        datum['epst'] = stock.epst()
-        datum['epst%'] = stock.epst() / p
+        datum['epst'] = stock.epst(dividends=True, premiums=True)
+        datum['epst%'] = datum['epst'] / p
 
         yesterday = stock.yesterday
 
