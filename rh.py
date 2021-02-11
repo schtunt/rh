@@ -5,7 +5,6 @@ import csv, requests, tempfile
 import click, pickle, json
 import math, hashlib, random
 from collections import defaultdict, namedtuple
-from functools import reduce
 
 from datetime import datetime, timedelta, timezone
 
@@ -18,6 +17,7 @@ import robin_stocks as rh
 import yahoo_earnings_calendar as yec
 import iexfinance.stocks as iex
 import polygon
+import finnhub
 
 from pprint import pformat
 
@@ -31,7 +31,9 @@ from constants import ZERO as Z
 import events
 
 import util
-from util import dec as D
+from util.numbers import dec as D
+from util.output import ansistrip as S
+DS = lambda s: D(S(s))
 
 def fmt(f, d):
     def fn(k):
@@ -133,6 +135,7 @@ class LotConnector:
         self.term = conterm(self.buy.timestamp, self.sell.timestamp)
 
         self.buy.connect(self)
+        self.sell.connect(self)
 
     def quantity(self, when=None):
         quantity = self._quantity
@@ -161,7 +164,7 @@ class StockFIFO:
         self.account = account
         self.ticker = StockFIFO.mappings.get(ticker, ticker)
 
-        self.quantity = 0
+        self._quantity = 0
 
         self.pointer = 0
         self.events = []
@@ -194,7 +197,7 @@ class StockFIFO:
     def __repr__(self):
         return '<StockFIFO %s x %s @ mean unit cost of %s and current equity of %s>' % (
             self.ticker,
-            util.color.qty(self.quantity),
+            util.color.qty(self._quantity),
             util.color.mulla(self.epst()),
             util.color.mulla(self.price),
         )
@@ -250,7 +253,7 @@ class StockFIFO:
 
     @property
     def equity(self):
-        return self.quantity * self.price
+        return self._quantity * self.price
 
     @property
     def gain(self):
@@ -290,6 +293,22 @@ class StockFIFO:
             ) for se in self.account.cached('events', 'activities', self.ticker)
                 for ec in se['equity_components']
         ]
+
+    @property
+    def recommendatios(self):
+        return self.account.cached('stocks', 'recommendation_trends', self.ticker)
+
+    @property
+    def target(self):
+        return self.account.cached('stocks', 'price_target', self.ticker)
+
+    @property
+    def quote(self):
+        return self.account.cached('stocks', 'quote', self.ticker)
+
+    def quantity(self, when=None):
+        cb = self.costbasis(realized=False, when=when)
+        return cb['short']['qty'] + cb['long']['qty']
 
     def costbasis(self, realized=True, when=None):
         '''TODO
@@ -334,11 +353,11 @@ class StockFIFO:
                 if event.side == 'sell':
                     lot = Lot(self, event)
                     self.lots.append(lot)
-                    self.quantity -= event.quantity()
+                    self._quantity -= event.quantity()
                 else:
-                    self.quantity += event.quantity()
+                    self._quantity += event.quantity()
             elif type(event) is events.StockSplitEvent:
-                self.quantity = event.forward(self.quantity)
+                self._quantity = event.forward(self._quantity)
 
             self.events.append(event)
 
@@ -351,7 +370,7 @@ class StockFIFO:
                 'cnt':  len(self.events),
                 'dts':  transaction.timestamp,
                 'trd':  self.traded(when=now),
-                'qty':  self.quantity,
+                'qty':  self._quantity,
                 'ptr':  self.pointer,
                 'epst': self.epst(when=now),
                 'crsq': cbr['short']['qty'],
@@ -408,26 +427,24 @@ class StockFIFO:
     def summarize(self):
         print('#' * 80)
 
-        for event in self.events:
-            if type(event) is events.StockSplitEvent: continue
-            elif event.side == 'buy': continue
-            elif event.side == 'sell':
-                # The buys
-                for tie in event.ties:
-                    print(tie.bought)
-
-                # The sell
-                print('(%s)' % event)
-                print()
+        for lot in self.lots:
+            for lc in lot.buys:
+                print(lc.buy)
+            print(lc.sell, "<future-event>")
+            print()
 
         # Remaining buys (without a corresponding sell; current equity)
         for event in self.events[self.pointer:]:
-            print(event)
+            if type(event) is events.TransactionEvent:
+                print(event)
+            else:
+                print()
+                print(event)
+                print()
 
-        print("Cost : %s x %s = %s" % (util.color.qty(self.quantity), util.color.mulla(self.epst()), util.color.mulla(self.cost)))
-        print("Value: %s x %s = %s" % (util.color.qty(self.quantity), util.color.mulla(self.price), util.color.mulla(self.equity)))
-        print("Capital Gains: %s" % (util.color.mulla(self.gain)))
-        print()
+        #print("Cost : %s x %s = %s" % (util.color.qty(self._quantity), util.color.mulla(self.epst()), util.color.mulla(self.cost)))
+        #print("Value: %s x %s = %s" % (util.color.qty(self._quantity), util.color.mulla(self.price), util.color.mulla(self.equity)))
+        #print("Capital Gains: %s" % (util.color.mulla(self.gain)))
 
 
 class CSVReader:
@@ -554,6 +571,9 @@ class Account:
 
         self.polygon_api_key = None
         self.iex_api_key = None
+        self.finnhub_api_key = None
+        self.finnhub = None
+
         self.connect()
 
         self._portfolio = {}
@@ -584,7 +604,7 @@ class Account:
         self.yec = yec.YahooEarningsCalendar()
 
         with open(os.path.join(pathlib.Path.home(), ".rhrc")) as fh:
-            username, password, self.polygon_api_key, self.iex_api_key = [
+            username, password, self.polygon_api_key, self.iex_api_key, self.finnhub_api_key = [
                 token.strip() for token in fh.readline().split(',')
             ]
 
@@ -593,6 +613,8 @@ class Account:
 
             os.environ['IEX_TOKEN'] = self.iex_api_key
             os.environ['IEX_OUTPUT_FORMAT'] = 'json'
+
+            self.finnhub = finnhub.Client(api_key=self.finnhub_api_key)
 
     def slurp(self):
         for ticker, parameters in self.transactions():
@@ -621,12 +643,12 @@ class Account:
 
             datum['ticker'] = ticker
             datum['premium_collected'] = positions['premiums'][ticker]
-            datum['dividends_collected'] = sum([
-                D(div['amount']) for div in dividends[ticker]
-            ])
+            datum['dividends_collected'] = sum(D(div['amount']) for div in dividends[ticker])
             datum['activities'] = '\n'.join(positions['activities'].get(ticker, []))
             datum['pe_ratio'] = D(fundamentals[ticker]['pe_ratio'])
             datum['pb_ratio'] = D(fundamentals[ticker]['pb_ratio'])
+
+            datum['collateral'] = positions['collateral'][ticker]
 
             datum['marketcap'] = fifo.marketcap
 
@@ -652,6 +674,7 @@ class Account:
     def _get_positions(self):
         data = self.cached('options', 'positions:all')
 
+        collateral = defaultdict(lambda: {'put': Z, 'call': Z})
         activities = defaultdict(list)
         for option in [o for o in data if D(o['quantity']) != Z]:
             ticker = option['chain_symbol']
@@ -660,24 +683,28 @@ class Account:
             instrument = self.cached('stocks', 'instrument', uri)
             if instrument['state'] == 'expired':
                 pass
-                #raise
             elif instrument['tradability'] == 'untradable':
                 raise
 
             premium = Z
             if instrument['state'] != 'queued':
-                #signum = -1 if option['type'] == 'short' else +1
                 premium -= D(option['quantity']) * D(option['average_price'])
 
-            activities[ticker].append("%s %s %s x%s K=%s X=%s P=%s" % (
+            itype = instrument['type']
+            activities[ticker].append("%s %s %s x%s P=%s K=%s X=%s" % (
                 instrument['state'],
                 option['type'],
-                instrument['type'],
+                itype,
                 util.color.qty(option['quantity'], Z),
+                util.color.mulla(premium),
                 util.color.mulla(instrument['strike_price']),
                 instrument['expiration_date'],
-                util.color.mulla(premium),
             ))
+
+            collateral[ticker][itype] += 100 * D(dict(
+                put=instrument['strike_price'],
+                call=option['quantity']
+            )[itype])
 
         premiums = defaultdict(lambda: Z)
         data = self.cached('orders', 'options:all')
@@ -743,7 +770,11 @@ class Account:
                 util.color.mulla(order['price']),
             ))
 
-        return dict(premiums=premiums, activities=activities)
+        return dict(
+            premiums=premiums,
+            activities=activities,
+            collateral=collateral,
+        )
 
     @connected
     def tickers(self):
@@ -768,8 +799,10 @@ class Account:
         arguments = [','.join(map(str, args)), ','.join(['%s=%s' % (k, v) for k, v in kwargs])]
         with util.output.progress("Cache fault on %s:%s(%s)" % (area, subarea, ','.join(arguments))):
             endpoint = ROBIN_STOCKS_API[area][subarea]
-
-            if type(endpoint) is PolygonEndpoint:
+            if type(endpoint) is FinnhubEndpoint:
+                fn = getattr(self.finnhub, endpoint.function)
+                data = fn(*args, **kwargs)
+            elif type(endpoint) is PolygonEndpoint:
                 with polygon.RESTClient(self.polygon_api_key) as pg:
                     fn = getattr(pg, endpoint.function)
                     response = fn(*args, **kwargs)
@@ -790,7 +823,7 @@ class Account:
                 data = endpoint.function(*args, **kwargs)
 
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                util.output.ddump("Generating {cachefile} from {}")
+                util.output.ddump(f"Generating {cachefile} from {tmp.name}")
                 pickle.dump(data, tmp)
                 tmp.flush()
                 os.rename(tmp.name, cachefile)
@@ -824,31 +857,34 @@ RobinStocksEndpoint = namedtuple('RobinStocksEndpoint', ['ttl', 'function'])
 PolygonEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
 IEXFinanceEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
 YahooEarningsCalendarEndpoint = namedtuple('YahooEarningsCalendarEndpoint', ['ttl', 'function'])
+FinnhubEndpoint = namedtuple('FinnhubEndpoint', ['ttl', 'function'])
 
 ROBIN_STOCKS_API = {
     'profiles': {
-        'account'     : RobinStocksEndpoint(7200, rh.profiles.load_account_profile),
-        'investment'  : RobinStocksEndpoint(7200, rh.profiles.load_investment_profile),
-        'portfolio'   : RobinStocksEndpoint(7200, rh.profiles.load_portfolio_profile),
-        'security'    : RobinStocksEndpoint(7200, rh.profiles.load_security_profile),
-        'user'        : RobinStocksEndpoint(7200, rh.profiles.load_user_profile),
+        'account'        : RobinStocksEndpoint(7200, rh.profiles.load_account_profile),
+        'investment'     : RobinStocksEndpoint(7200, rh.profiles.load_investment_profile),
+        'portfolio'      : RobinStocksEndpoint(7200, rh.profiles.load_portfolio_profile),
+        'security'       : RobinStocksEndpoint(7200, rh.profiles.load_security_profile),
+        'user'           : RobinStocksEndpoint(7200, rh.profiles.load_user_profile),
     },
     'stocks': {
-        'fundamentals': RobinStocksEndpoint(7200,  rh.stocks.get_fundamentals),
-        'instruments' : RobinStocksEndpoint(7200,  rh.stocks.get_instruments_by_symbols),
-        'instrument'  : RobinStocksEndpoint(7200,  rh.stocks.get_instrument_by_url),
-        'prices'      : RobinStocksEndpoint(7200,  rh.stocks.get_latest_price),
-        'news'        : RobinStocksEndpoint(7200,  rh.stocks.get_news),
-        'quote'       : IEXFinanceEndpoint(7200,  'get_quote'),
-        'quotes'      : RobinStocksEndpoint(7200,  rh.stocks.get_quotes),
-        'ratings'     : RobinStocksEndpoint(7200,  rh.stocks.get_ratings),
-        'splits'      : IEXFinanceEndpoint(86400,  'get_splits'),
-        'yesterday'   : IEXFinanceEndpoint(21600,  'get_previous_day_prices'),
-        'marketcap'   : IEXFinanceEndpoint(86400,  'get_market_cap'),
-        'losers'      : IEXFinanceEndpoint(300,    'get_market_losers'),
-        'gainers'     : IEXFinanceEndpoint(300,    'get_market_gainers'),
-        'stats'       : IEXFinanceEndpoint(21600,  'get_key_stats'),
-        'historicals' : RobinStocksEndpoint(7200,  rh.stocks.get_stock_historicals),
+        'fundamentals'   : RobinStocksEndpoint(7200,  rh.stocks.get_fundamentals),
+        'instruments'    : RobinStocksEndpoint(7200,  rh.stocks.get_instruments_by_symbols),
+        'instrument'     : RobinStocksEndpoint(7200,  rh.stocks.get_instrument_by_url),
+        'prices'         : RobinStocksEndpoint(7200,  rh.stocks.get_latest_price),
+        'target'         : FinnhubEndpoint(7200,      'price_target'),
+        'recommendations': FinnhubEndpoint(7200,      'recommendation_trends'),
+        'news'           : RobinStocksEndpoint(7200,  rh.stocks.get_news),
+        'quote'          : IEXFinanceEndpoint(7200,  'get_quote'),
+        'quotes'         : RobinStocksEndpoint(7200,  rh.stocks.get_quotes),
+        'ratings'        : RobinStocksEndpoint(7200,  rh.stocks.get_ratings),
+        'splits'         : IEXFinanceEndpoint(86400,  'get_splits'),
+        'yesterday'      : IEXFinanceEndpoint(21600,  'get_previous_day_prices'),
+        'marketcap'      : IEXFinanceEndpoint(86400,  'get_market_cap'),
+        'losers'         : IEXFinanceEndpoint(300,    'get_market_losers'),
+        'gainers'        : IEXFinanceEndpoint(300,    'get_market_gainers'),
+        'stats'          : IEXFinanceEndpoint(21600,  'get_key_stats'),
+        'historicals'    : RobinStocksEndpoint(7200,  rh.stocks.get_stock_historicals),
     },
     'options': {
         'positions:all'  : RobinStocksEndpoint(300, rh.options.get_all_option_positions),
@@ -935,6 +971,11 @@ def markets(ctx, subarea):
     account = ctx.obj['account']
     print(account.human('markets', subarea))
 
+FILTERS = {
+    'active': lambda d: len(d['activities']),
+    'optionable': lambda d: DS(d['quantity']) - DS(d['CC.Coll']) > 100,
+}
+
 VIEWS = {
     'pie': {
         'sort_by': 'rank',
@@ -943,22 +984,52 @@ VIEWS = {
             'quantity', 'price',
             'epst', 'epst%',
             'equity', 'equity_change', 'percent_change',
-            'growth',
             'premium_collected', 'dividends_collected',
-            'short', 'bucket', 'rank', 'ma', 'since_close', 'since_open', 'alerts',
+            'short', 'bucket',
+            'rank', 'ma', 'since_close', 'since_open', 'alerts',
             'pe_ratio', 'pb_ratio', 'beta',
+            'CC.Coll', 'CSP.Coll',
+            'activities',
+        ],
+    },
+    'losers': {
+        'sort_by': 'rank',
+        'columns': [
+            'ticker', 'percentage',
+            'quantity', 'price',
+            'epst', 'epst%',
+            'crv', 'cuv',
+            'equity', 'equity_change', 'percent_change',
+            'premium_collected', 'dividends_collected',
+            'rank', 'ma', 'since_close', 'since_open', 'alerts',
+            'pe_ratio', 'pb_ratio', 'beta',
+            'CC.Coll', 'CSP.Coll',
+            'activities',
+        ],
+    },
+     'gen': {
+        'sort_by': 'CC.Coll',
+        'filter_by': 'optionable',
+        'columns': [
+            'ticker', 'percentage',
+            'quantity', 'price',
+            'epst', 'epst%',
+            'equity', 'equity_change', 'percent_change',
+            'premium_collected', 'dividends_collected',
+            'rank', 'ma', 'since_close', 'since_open', 'alerts',
+            'pe_ratio', 'pb_ratio', 'beta',
+            'CC.Coll', 'CSP.Coll',
             'activities',
         ],
     },
     'active': {
         'sort_by': 'ticker',
-        'filter_by': lambda d: len(d['activities']),
+        'filter_by': 'active',
         'columns': [
             'ticker', 'percentage',
             'price', 'quantity',
             'equity',
             'equity_change', 'percent_change',
-            'growth',
             'premium_collected', 'dividends_collected',
             'activities',
         ],
@@ -967,8 +1038,8 @@ VIEWS = {
         'sort_by': 'ticker',
         'columns': [
             'ticker',
-            'price', 'quantity',
             'equity',
+            'price', 'quantity',
             'cusq', 'cusv', 'culq', 'culv',
             'crsq', 'crsv', 'crlq', 'crlv',
             'premium_collected', 'dividends_collected',
@@ -1018,7 +1089,7 @@ def tabulize(ctx, view, reverse, limit):
         datum['alerts'] = ' '.join(alerts)
 
         prices = (datum['200dma'], datum['50dma'], datum['price'])
-        score = reduce(lambda a,b:a*b, map((lambda n: n[0]/n[1]), map(sorted, zip(prices, sorted(prices)))))
+        score = util.numbers.growth_score(prices)
 
         p200, p50, p = prices
         c = 'yellow'
@@ -1038,8 +1109,17 @@ def tabulize(ctx, view, reverse, limit):
         datum['crlq'] = cbr['long']['qty']
         datum['crlv'] = cbr['long']['value']
 
+        datum['crv'] = datum['crsv'] + datum['crlv']
+        datum['crq'] = datum['crsq'] + datum['crlq']
+        datum['cuv'] = datum['cusv'] + datum['culv']
+        datum['cuq'] = datum['cusq'] + datum['culq']
+
         datum['epst'] = stock.epst(dividends=True, premiums=True)
         datum['epst%'] = datum['epst'] / p
+
+        collateral = datum['collateral']
+        datum['CC.Coll'] = collateral['call']
+        datum['CSP.Coll'] = collateral['put']
 
         yesterday = stock.yesterday
 
@@ -1050,15 +1130,6 @@ def tabulize(ctx, view, reverse, limit):
         datum['since_open'] = (p - o) / o
 
         datum['beta'] = stock.beta
-
-        datum['growth'] = Z
-        #(
-        #    sum((
-        #        D(datum['equity']),
-        #        D(datum['dividends_collected']),
-        #        D(datum['premium_collected']),
-        #    )) / D(datum['cost']) - 1
-        #)
 
         #l = D(fundamentals[ticker]['low_52_weeks'])
         #h = D(fundamentals[ticker]['high_52_weeks'])
@@ -1076,7 +1147,7 @@ def tabulize(ctx, view, reverse, limit):
                 elif p < 1000: round_to = D('0.2')
                 else: round_to = D('.1')
                 datum['bucket'] = b//1000
-                datum['short'] = util.rnd((eq - b) / datum['price'], round_to)
+                datum['short'] = util.numbers.rnd((eq - b) / datum['price'], round_to)
                 break
 
         # Maps [-100/x .. +100/x] to [0 .. 100]
@@ -1085,13 +1156,15 @@ def tabulize(ctx, view, reverse, limit):
         yesterchange = D(yesterday['marketChangeOverTime'])
         totalchange = D(datum['percent_change'])/100
         eq = D(datum['equity'])
+
+        # Use 'view' to multiplex 'rank' here, for now just using this one for all
         scores = {
-            'yesterchange':     (25, normalize(yesterchange, D('4'))),
-            'since_close':      (25, normalize(datum['since_close'], D('4'))),
-            'since_open':       (15, normalize(datum['since_open'], D('4'))),
-            'bucket':           (15, normalize((eq/1000 - datum['bucket'])/13, 1) if datum['bucket'] > 0 else 1),
-            'totalchange':      (10, normalize(-totalchange, D('0.25'))),
-            'growth':           (10, normalize(datum['growth'], D('1'))),
+            'epst':             (50, normalize(datum['epst%'], D(1))),
+            'yesterchange':     (10, normalize(yesterchange, D(4))),
+            'since_close':      (10, normalize(datum['since_close'], D(4))),
+            'since_open':       (10, normalize(datum['since_open'], D(4))),
+            'bucket':           (10, normalize((eq/1000 - datum['bucket'])/13, 1) if datum['bucket'] > 0 else 1),
+            'totalchange':      (10, normalize(-totalchange, D(0.25))),
         }
 
         if ticker in constants.DEBUG:
@@ -1109,9 +1182,11 @@ def tabulize(ctx, view, reverse, limit):
         'bucket': lambda b: util.color.colored('$%dk' % b, 'blue'),
         'since_open': util.color.mpct,
         'since_close': util.color.mpct,
+        'CC.Coll': util.color.qty0,                   # Covered Call Collateral
+        'CSP.Coll': util.color.mulla,                 # Cash-Secured Put Collateral
         'price': util.color.mulla,
-        'epst': util.color.mulla,
-        'epst%': util.color.mpct,
+        'epst': util.color.mulla,                     # Earnings-Per-Share Traded
+        'epst%': util.color.mpct,                     # Earnings-Per-Share Traded as % of current stock price
         'quantity': util.color.qty0,
         'average_buy_price': util.color.mulla,
         'equity': util.color.mulla,
@@ -1126,7 +1201,10 @@ def tabulize(ctx, view, reverse, limit):
         'short': util.color.qty1,
         'premium_collected': util.color.mulla,
         'dividends_collected': util.color.mulla,
-        'growth': util.color.mpct,
+        'cuq': util.color.qty,
+        'cuv': util.color.mulla,
+        'crq': util.color.qty,
+        'crv': util.color.mulla,
         'cusq': util.color.qty,
         'cusv': util.color.mulla,
         'culq': util.color.qty,
@@ -1154,7 +1232,7 @@ def tabulize(ctx, view, reverse, limit):
     )
 
     if filter_by is not None:
-        table = table.rows.filter(filter_by)
+        table = table.rows.filter(FILTERS[filter_by])
 
     table.rows.sort(sort_by, reverse)
 
@@ -1181,21 +1259,17 @@ def preinitialize(repl=False):
         os.mkdir(constants.CACHE_DIR)
 
 acc = None
-if __name__ == '__main__':
-    preinitialize()
-    cli(obj={'account': Account()})
-elif not hasattr(__main__, '__file__'):
-    print("Interactive Execution Mode Detected")
-
-    print("Pre-Initializing REPL Environment...")
+def interact():
+    print("Preparing REPL...")
     preinitialize(repl=True)
 
-    print("Initializing REPL Environment...")
-    module = sys.modules[__name__]
+    print("Initializing your Robinhood Account...")
+    global acc
     acc = Account()
     acc.slurp()
 
-    print("Injecting Stock Objects for all known Tickers from Robinhood...")
+    print("Injecting Stock objects for all stocks in your portfolio...")
+    module = sys.modules[__name__]
     for ticker in acc.tickers:
         key = ticker.lower()
         setattr(module, key, acc.get_stock(ticker))
@@ -1208,3 +1282,9 @@ elif not hasattr(__main__, '__file__'):
     print(" + rh.acc.yec       (YahooEarningsCalendarEndpoint API)")
     print(" + rh._<ticker>     (IEXFinanceEndpoint Stock object API)")
     print(" + rh.<ticker>      (Local Stock object API multiplexor")
+
+if __name__ == '__main__':
+    preinitialize()
+    cli(obj={'account': Account()})
+elif not hasattr(__main__, '__file__'):
+    interact()

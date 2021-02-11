@@ -2,7 +2,7 @@ import constants
 from constants import ZERO as Z
 
 import util
-from util import dec as D
+from util.numbers import dec as D
 
 
 class Event:
@@ -38,6 +38,30 @@ class TransactionEvent(Event):
         self.timestamp = util.datetime.dtp.parse(timestamp)
         self.otype = otype
 
+    def __repr__(self):
+        price = self.price()
+        qty = self.quantity()
+
+        q = util.color.qty(qty)
+        if len(self.connections) > 1:
+            q = '%s (%s)' % (
+                q, ', '.join([util.color.qty(lc.quantity()) for lc in self.connections])
+            )
+
+        rstr = '%s#%05d %-32s -- %s %s %s x %s = %s -> %sx' % (
+            self.ticker,
+            self.ident,
+            self.timestamp,
+            self.otype,
+            self.side,
+            q,
+            util.color.mulla(price),
+            util.color.mulla(price * qty),
+            util.color.qty(self.stock.quantity(when=self.timestamp)),
+        )
+
+        return '<TransactionEvent %s>' % rstr
+
     def price(self, when=None):
         price = self._price
         if not when: return price
@@ -57,7 +81,6 @@ class TransactionEvent(Event):
                 quantity = splitter.forward(quantity)
 
         return quantity
-
 
     def available(self, when=None):
         '''
@@ -82,28 +105,6 @@ class TransactionEvent(Event):
         stock._quantity += signum(self.side) * self._quantity
 
 
-    #def __repr__(self):
-        #return str((self.ticker, self.side, self.available(), self.quantity(), self.price(), self.otype, len(self.connections)))
-        #q = util.color.qty(self.qty)
-        #if len(self.ties) > 1:
-        #    q = '%s (%s)' % (q, ', '.join([tie.portion(self) for tie in self.ties]))
-
-        #rstr = '#%05d %s %s %s %s (cg=%s): %s x %s = %s @ %s' % (
-        #    self.ident,
-        #    self.ticker,
-        #    util.color.qty(self.running),
-        #    self.otype,
-        #    self.side,
-        #    self.term,
-        #    q,
-        #    util.color.mulla(self.price),
-        #    util.color.mulla(self.price * self.qty),
-        #    self.timestamp,
-        #)
-
-        #return '<TransactionEvent %s>' % rstr
-
-
 class StockSplitEvent(Event):
     def __init__(self, stock, date, multiplier, divisor):
         super().__init__(stock)
@@ -113,13 +114,12 @@ class StockSplitEvent(Event):
         self.divisor = D(divisor)
 
     def __repr__(self):
-        rstr = '#%05d %s %s stock-split %s-for-%s @ %s' % (
-            self.ident,
+        rstr = '%s#%05d %-32s -- stock-split %s:%s' % (
             self.ticker,
-            -1,
-            util.color.qty(self.multiplier),
-            util.color.qty(self.divisor),
+            self.ident,
             self.timestamp,
+            util.color.qty0(self.multiplier),
+            util.color.qty0(self.divisor),
         )
 
         return '<StockSplitEvent  %s>' % rstr

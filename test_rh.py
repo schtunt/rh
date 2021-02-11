@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone
 
 import util
-from util import dec as D
+from util.numbers import dec as D
 import tests.fixtures
 
 
@@ -32,25 +32,27 @@ prices = [
     D('155'),
     D('180'),
     D('210'),
-    D('210')/4,
+    D('52.5'),
     D('60'),
     D('55'),
     D('61.6'),
 ]
 
-month2date = lambda m: datetime(2020, m, 20, 0, 0, tzinfo=timezone.utc)
-@pytest.fixture(scope='function', params=range(1, 1+len(prices)))
-def month(mocker, request):
-    month = request.param
-    mocker.patch.object(rh.util.datetime, 'now', lambda: month2date(month))
-    return month
+index2month = lambda i: 1+i%12
+index2year  = lambda i: 2020+(i//12)
+index2date  = lambda i: datetime(index2year(i), index2month(i), 20, 0, 0, tzinfo=timezone.utc)
+@pytest.fixture(scope='function', params=range(len(prices)))
+def index(mocker, request):
+    index = request.param
+    mocker.patch.object(rh.util.datetime, 'now', lambda: index2date(index))
+    return index
 
-month2price = lambda m: prices[m-1]
+index2price = lambda i: prices[i]
 @pytest.fixture(scope='function')
-def price(mocker, month):
-    tests.fixtures.MOCKED_APIS['stocks:prices'][0] = '%9.6f' % month2price(month)
+def price(mocker, index):
+    tests.fixtures.MOCKED_APIS['stocks:prices'][0] = '%9.6f' % index2price(index)
     mocker.patch.object(rh.Account, 'cached', tests.fixtures.cached)
-    return month2price(month)
+    return index2price(index)
 
 
 CSV = '''\
@@ -74,26 +76,26 @@ ANSWER_KEYS = [
 def key(request):
     return request.param
 
-def answers(month, price):
+def answers(index, price):
     p = price
     return {
         key: D([
-            (1, 0,  100, 100, 0             ,   0,    0, 0, 0, 100,                0, 0, 0),
-            (2, 0,  200, 200, 5             ,   0,    0, 0, 0, 200,             1000, 0, 0),
-            (3, 0,  200, 100, 35            , 100, 4000, 0, 0, 100,             3000, 0, 0),
-            (4, 1,  200,   0, 42.5          , 200, 8500, 0, 0,   0,                0, 0, 0),
-            (5, 1,  300, 100, 85/D('3')     , 200, 8500, 0, 0, 100,                0, 0, 0),
-            (6, 4,  300,  99, 115/D('3')    , 201, 8530, 0, 0,  99,             2970, 0, 0),
-            (7, 4, 1200, 396, 115/D('12')   , 804, 8530, 0, 0, 396,             2970, 0, 0),
-            (8, 4, 1204, 400, 1447/D('120') , 804, 8530, 0, 0, 396,             5940, 0, 0),
-        ][month-1][index]) for index, key in enumerate(ANSWER_KEYS)
+            (1, 0,  100, 100,             0,   0,    0, 0, 0, 100,    0, 0, 0),
+            (2, 0,  200, 200,             5,   0,    0, 0, 0, 200, 1000, 0, 0),
+            (3, 0,  200, 100,            35, 100, 4000, 0, 0, 100, 3000, 0, 0),
+            (4, 1,  200,   0,          42.5, 200, 8500, 0, 0,   0,    0, 0, 0),
+            (5, 1,  300, 100,     85/D('3'), 200, 8500, 0, 0, 100,    0, 0, 0),
+            (6, 4,  300,  99,    115/D('3'), 201, 8530, 0, 0,  99, 2970, 0, 0),
+            (7, 4, 1200, 396,   115/D('12'), 804, 8530, 0, 0, 396, 2970, 0, 0),
+            (8, 4, 1204, 400, 1447/D('120'), 804, 8530, 0, 0, 396, 5940, 0, 0),
+        ][index][j]) for j, key in enumerate(ANSWER_KEYS)
     }
 
-def test_stock(month, price, key):
-    if not 9 > month > 7: return
+def test_stock(index, price, key):
+    if index > 7: return
 
     aapl = mkstonk('AAPL')
-    ledger = aapl._ledger[month-1]
-    answer = answers(month, price)
+    ledger = aapl._ledger[index]
+    answer = answers(index, price)
 
     assert ledger[key] == answer[key]

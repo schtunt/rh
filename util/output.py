@@ -1,3 +1,4 @@
+import re
 import time
 import json
 import decimal, datetime
@@ -33,7 +34,7 @@ def ddump(data, title=None, force=False):
     if len(constants.DEBUG) == 0 and not force: return
 
     title = '%s(%d entries)' % (f'{title} ' if title else '', len(data))
-    print(_dump(data, f'[DEBUG:%s]-=[ %s ]=-' % (','.join(constants.DEBUG), title)))
+    print(_dump(data, '[DEBUG:%s]-=[ %s ]=-' % (','.join(constants.DEBUG), title)))
 
 
 class progress:
@@ -55,3 +56,7 @@ class progress:
         delta = self._stopped_at - self._started_at
         if delta > 3:
             print("%d seconds" % delta)
+
+RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+def ansistrip(s):
+    return RE_ANSI.sub('', s)

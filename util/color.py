@@ -1,7 +1,7 @@
 import locale
 from termcolor import colored
 
-from . import dec as D
+from .numbers import dec as D
 
 def colorize(f, n, d, v):
     c = d[0]
