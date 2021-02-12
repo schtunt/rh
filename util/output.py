@@ -3,6 +3,8 @@ import time
 import json
 import decimal, datetime
 
+from pprint import pformat
+
 from pygments import highlight
 from pygments.lexers import PythonLexer
 from pygments.formatters import Terminal256Formatter

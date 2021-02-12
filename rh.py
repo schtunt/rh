@@ -3,23 +3,22 @@
 import os, sys, locale
 import csv, requests, tempfile
 import click, pickle, json
-import math, hashlib, random
 from collections import defaultdict, namedtuple
+
+import math, hashlib, random
+from monkeylearn import MonkeyLearn
+from functools import reduce
 
 from datetime import datetime, timedelta, timezone
 
 import pathlib
 from pathlib import posixpath
 
-from collections import defaultdict
-
 import robin_stocks as rh
 import yahoo_earnings_calendar as yec
 import iexfinance.stocks as iex
 import polygon
 import finnhub
-
-from pprint import pformat
 
 from beautifultable import BeautifulTable
 
@@ -231,35 +230,75 @@ class StockFIFO:
 
         return series
 
-    def sentiments(self):
+
+    def _analyst_sentiments(self):
         '''
         Convert the analyst sentiment series on the stock to a score, using extremely
         questionable mathematics.
         '''
 
+        data = {
+            'buy':  { 'risk': Z, 'mean': Z, 'std': Z },
+            'sell': { 'risk': Z, 'mean': Z, 'std': Z },
+            'hold': { 'risk': Z, 'mean': Z, 'std': Z },
+        }
+
         ss = util.numbers.growth_score
         series = self._sentiment_series()
-        sentiments = {}
-        for key, data in series.items():
-            numerator, denominator = ss(data), ss(sorted(data, reverse=True))
+        for key, datum in series.items():
+            numerator, denominator = ss(datum), ss(sorted(datum, reverse=True))
             if denominator > 0:
-                sentiments[key] = {
+                data[key] = {
                     'risk': numerator / denominator,
-                    'mean': util.numbers.mean(data),
-                    'std': util.numbers.std(data),
+                    'mean': util.numbers.mean(datum),
+                    'std': util.numbers.std(datum),
                 }
-
-        if not ('buy' in sentiments and 'sell' in sentiments): return sentiments
 
         # if the analysts rating increases in time perfectly, then the risk score will be zero,
         # and so the score will simply be the mean of their votes over time.  In the worst case,
         # however, the score will be the mean minus one standard deviation.
-        mkscore = lambda key: sentiments[key]['mean'] - sentiments[key]['std'] * sentiments[key]['risk']
-        scores = dict(buy=mkscore('buy'), sell=mkscore('sell'))
-        scores['hold'] = mkscore('hold') if 'hold' in sentiments else 0
-        scores['overall'] = scores['buy'] - scores['sell']
+        mkscore = lambda key: data[key]['mean'] - data[key]['std'] * data[key]['risk']
+        sentiments = dict(buy=mkscore('buy'), sell=mkscore('sell'), hold=mkscore('hold'))
 
-        return scores
+        return sentiments
+
+    def _news_sentiments(self):
+        news1 = self.account.cached('stocks', 'news1', self.ticker)
+        news = ['. '.join((blb['preview_text'], blb['title'])) for blb in news1]
+
+        news2 = self.account.cached('stocks', 'news2', self.ticker)
+        news += ['. '.join([blb['headline'], blb['summary']]) for blb in news2]
+
+        result = self.account.cached('classifiers', 'sentiment', news=news)
+
+        # filter out unnecessary data
+        data = [e for ee in map(lambda e: e['classifications'], result.body) for e in ee]
+
+        def l(e, ee):
+             e[ee['tag_name']] += D(ee['confidence'])
+             return e
+
+        # aggregate the remaining serntiment data
+        aggregate = reduce(l, data, defaultdict(lambda: Z))
+        total = sum(aggregate.values())
+
+        sentiments = {
+            'Positive': Z,
+            'Negative': Z,
+            'Neutral':  Z,
+        }
+
+        sentiments.update({
+            sentiment: confidence / total for sentiment, confidence in aggregate.items()
+        })
+
+        return sentiments
+
+    def sentiments(self):
+        return {
+            'news': self._news_sentiments(),
+            'analysts': self._analyst_sentiments(),
+        }
 
     @property
     def ttm(self):
@@ -615,6 +654,8 @@ class Account:
         self.iex_api_key = None
         self.finnhub_api_key = None
         self.finnhub = None
+        self.monkeylearn_api = None
+        self.ml = None
 
         self.connect()
 
@@ -646,9 +687,13 @@ class Account:
         self.yec = yec.YahooEarningsCalendar()
 
         with open(os.path.join(pathlib.Path.home(), ".rhrc")) as fh:
-            username, password, self.polygon_api_key, self.iex_api_key, self.finnhub_api_key = [
-                token.strip() for token in fh.readline().split(',')
-            ]
+            (
+                username, password,
+                self.polygon_api_key,
+                self.iex_api_key,
+                self.finnhub_api_key,
+                self.monkeylearn_api,
+            ) = [ token.strip() for token in fh.readline().split(',') ]
 
             if self.robinhood is None:
                 self.robinhood = rh.login(username, password)
@@ -657,6 +702,7 @@ class Account:
             os.environ['IEX_OUTPUT_FORMAT'] = 'json'
 
             self.finnhub = finnhub.Client(api_key=self.finnhub_api_key)
+            self.ml = MonkeyLearn(self.monkeylearn_api)
 
     def slurp(self):
         for ticker, parameters in self.transactions():
@@ -837,8 +883,9 @@ class Account:
         if cachefile.exists():
             return pickle.load(open(cachefile, 'rb'))
 
-        arguments = [','.join(map(str, args)), ','.join(['%s=%s' % (k, v) for k, v in kwargs])]
-        with util.output.progress("Cache fault on %s:%s(%s)" % (area, subarea, ','.join(arguments))):
+        with util.output.progress(
+            "Cache fault on %s:%s(%d x args, %d x kwargs)" % (area, subarea, len(args), len(kwargs))
+        ):
             endpoint = ROBIN_STOCKS_API[area][subarea]
             if type(endpoint) is FinnhubEndpoint:
                 fn = getattr(self.finnhub, endpoint.function)
@@ -860,6 +907,13 @@ class Account:
             elif type(endpoint) is YahooEarningsCalendarEndpoint:
                 fn = getattr(self.yec, endpoint.function)
                 data = datetime.fromtimestamp(fn(args[0]))
+            elif type(endpoint) is MonkeyLearnEndpoint:
+                if area == 'classifiers':
+                    model_id = endpoint.model_id
+                    news = kwargs['news']
+                    data = self.ml.classifiers.classify(model_id, news)
+                else:
+                    raise
             else:
                 data = endpoint.function(*args, **kwargs)
 
@@ -899,8 +953,12 @@ PolygonEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
 IEXFinanceEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
 YahooEarningsCalendarEndpoint = namedtuple('YahooEarningsCalendarEndpoint', ['ttl', 'function'])
 FinnhubEndpoint = namedtuple('FinnhubEndpoint', ['ttl', 'function'])
+MonkeyLearnEndpoint = namedtuple('MonkeyLearnEndpoint', ['ttl', 'model_id'])
 
 ROBIN_STOCKS_API = {
+    'classifiers': {
+        'sentiment'      : MonkeyLearnEndpoint(14400, 'cl_pi3C7JiL')
+    },
     'profiles': {
         'account'        : RobinStocksEndpoint(7200, rh.profiles.load_account_profile),
         'investment'     : RobinStocksEndpoint(7200, rh.profiles.load_investment_profile),
@@ -915,8 +973,9 @@ ROBIN_STOCKS_API = {
         'prices'         : RobinStocksEndpoint(7200,  rh.stocks.get_latest_price),
         'target'         : FinnhubEndpoint(7200,      'price_target'),
         'recommendations': FinnhubEndpoint(7200,      'recommendation_trends'),
-        'news'           : RobinStocksEndpoint(7200,  rh.stocks.get_news),
-        'quote'          : IEXFinanceEndpoint(7200,  'get_quote'),
+        'news1'          : RobinStocksEndpoint(60,    rh.stocks.get_news),
+        'news2'          : IEXFinanceEndpoint(60,     'get_news'),
+        'quote'          : IEXFinanceEndpoint(7200,   'get_quote'),
         'quotes'         : RobinStocksEndpoint(7200,  rh.stocks.get_quotes),
         'ratings'        : RobinStocksEndpoint(7200,  rh.stocks.get_ratings),
         'splits'         : IEXFinanceEndpoint(86400,  'get_splits'),
@@ -1024,7 +1083,7 @@ VIEWS = {
             'ticker', 'percentage',
             'quantity', 'price',
             'epst', 'epst%',
-            'analyst',
+            'rank', 'analyst', 'news', 'ma',
             'equity', 'equity_change', 'percent_change',
             'premium_collected', 'dividends_collected',
             'short', 'bucket',
@@ -1039,7 +1098,7 @@ VIEWS = {
         'columns': [
             'ticker',
             'marketcap',
-            'rank', 'analyst', 'ma', 'epst%',
+            'rank', 'analyst', 'news', 'ma', 'epst%',
             'alerts',
             'pe_ratio', 'pb_ratio', 'beta',
             'equity', 'equity_change', 'percent_change',
@@ -1147,7 +1206,13 @@ def tabulize(ctx, view, sort_by, reverse, limit):
         datum['ma'] = util.numbers.growth_score(prices)
 
         sentiments = stock.sentiments()
-        datum['analyst'] = D(sentiments['overall'] if sentiments else 0)
+        datum['analyst'] = Z
+        if sentiments['analysts']:
+            scores = sentiments['analysts']
+            datum['analyst'] += scores['buy'] - scores['sell']
+
+        scores = sentiments['news']
+        datum['news'] = scores['Positive'] - scores['Negative']
 
         cbu = stock.costbasis(realized=False)
         datum['cusq'] = cbu['short']['qty']
@@ -1208,9 +1273,10 @@ def tabulize(ctx, view, sort_by, reverse, limit):
 
         # Use 'view' to multiplex 'rank' here, for now just using this one for all
         scores = {
-            'epst':          (20, util.numbers.scale_and_shift(datum['epst%'], D(1))),
-            'ma':            (20, util.numbers.scale_and_shift(datum['ma'], D(1))),
-            'analyst':       (20, util.numbers.scale_and_shift(datum['analyst'], D(1))),
+            'epst':          (15, util.numbers.scale_and_shift(datum['epst%'], D(1))),
+            'ma':            (15, util.numbers.scale_and_shift(datum['ma'], D(1))),
+            'analyst':       (15, util.numbers.scale_and_shift(datum['analyst'], D(1))),
+            'news':          (15, util.numbers.scale_and_shift(datum['news'], D(1))),
             'yesterchange':  (10, util.numbers.scale_and_shift(yesterchange, D(4))),
             'since_close':   (10, util.numbers.scale_and_shift(datum['since_close'], D(4))),
             'since_open':    (10, util.numbers.scale_and_shift(datum['since_open'], D(4))),
@@ -1260,6 +1326,7 @@ def tabulize(ctx, view, sort_by, reverse, limit):
         'crlq': util.color.qty,
         'crlv': util.color.mulla,
         'analyst': util.color.qty,
+        'news': util.color.qty,
     }
 
     data = account.data.values()
@@ -1347,8 +1414,13 @@ def interact():
     print(" + rh.acc.rh        (RobinStocksEndpoint API)")
     print(" + rh.acc.iex       (IEXFinanceEndpoint API)")
     print(" + rh.acc.yec       (YahooEarningsCalendarEndpoint API)")
+    print(" + rh.acc.finhubb   (FinnhubEndpoint API)")
+    print(" + rh.acc.ml        (MonkeyLearnEndpoint API)")
     print(" + rh._<ticker>     (IEXFinanceEndpoint Stock object API)")
     print(" + rh.<ticker>      (Local Stock object API multiplexor")
+    print()
+    print("Meta-helpers for this REPL")
+    print(" + relmod()         (reload wthout having to exit the repl)")
 
 if __name__ == '__main__':
     preinitialize()

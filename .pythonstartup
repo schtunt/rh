@@ -1,3 +1,10 @@
 import rh
+import importlib
+
+def relmod():
+    global rh
+    rh = importlib.reload(rh)
 
 rh.interact()
+account = rh.acc
+util = rh.util
