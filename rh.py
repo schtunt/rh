@@ -222,9 +222,59 @@ class StockFIFO:
     def beta(self):
         return self._iex.get_beta()
 
+    def _sentiment_series(self):
+        '''
+        Looking at historic analyst sentiments, and exagerating the strong opinions, creates
+        a time series, to show if those sentiments have been growing, or shrinking with time.
+        '''
+        series = dict(buy=[], hold=[], sell=[])
+        for r in reversed(self.account.cached('stocks', 'recommendations', self.ticker)):
+            b = r['buy'] + pow(r['strongBuy'], 2)
+            s = r['sell'] + pow(r['strongSell'], 2)
+            h = r['hold']
+            t = sum((b, h, s))
+            series['buy'].append(b/t)
+            series['hold'].append(s/t)
+            series['sell'].append(h/t)
+
+        return series
+
+    def sentiments(self):
+        '''
+        Convert the analyst sentiment series on the stock to a score, using extremely
+        questionable mathematics.
+        '''
+
+        ss = util.numbers.growth_score
+        series = self._sentiment_series()
+        sentiments = {}
+        for key, data in series.items():
+            numerator, denominator = ss(data), ss(sorted(data, reverse=True))
+            if denominator > 0:
+                sentiments[key] = {
+                    'risk': numerator / denominator,
+                    'mean': util.numbers.mean(data),
+                    'std': util.numbers.std(data),
+                }
+
+        if not ('buy' in sentiments and 'sell' in sentiments): return sentiments
+
+        # if the analysts rating increases in time perfectly, then the risk score will be zero,
+        # and so the score will simply be the mean of their votes over time.  In the worst case,
+        # however, the score will be the mean minus one standard deviation.
+        mkscore = lambda key: sentiments[key]['mean'] - sentiments[key]['std'] * sentiments[key]['risk']
+        scores = dict(buy=mkscore('buy'), sell=mkscore('sell'))
+        scores['hold'] = mkscore('hold') if 'hold' in sentiments else 0
+        scores['overall'] = scores['buy'] - scores['sell']
+
+        return scores
+
     @property
-    def ttm_eps(self):
-        return self.stats['ttmEPS']
+    def ttm(self):
+        return dict(
+            eps=self.stats['ttmEPS'],
+            div=self.stats['ttmDividendRate'],
+        )
 
     @property
     def fundamentals(self):
@@ -708,11 +758,10 @@ class Account:
 
         premiums = defaultdict(lambda: Z)
         data = self.cached('orders', 'options:all')
-        for option in [o for o in data if o['state'] not in ('cancelled', 'expired')]:
+        for option in [o for o in data if o['state'] not in ('cancelled')]:
             ticker = option['chain_symbol']
 
             if ticker in constants.DEBUG:
-                print('#' * 80)
                 util.output.ddump(option, title='orders.options:all')
 
             strategies = []
@@ -983,6 +1032,7 @@ VIEWS = {
             'ticker', 'percentage',
             'quantity', 'price',
             'epst', 'epst%',
+            'analyst',
             'equity', 'equity_change', 'percent_change',
             'premium_collected', 'dividends_collected',
             'short', 'bucket',
@@ -995,14 +1045,13 @@ VIEWS = {
     'losers': {
         'sort_by': 'rank',
         'columns': [
-            'ticker', 'percentage',
-            'quantity', 'price',
-            'epst', 'epst%',
-            'crv', 'cuv',
+            'ticker',
+            'rank', 'analyst', 'ma', 'epst%',
+            'alerts',
+            'pe_ratio', 'pb_ratio', 'beta',
             'equity', 'equity_change', 'percent_change',
             'premium_collected', 'dividends_collected',
-            'rank', 'ma', 'since_close', 'since_open', 'alerts',
-            'pe_ratio', 'pb_ratio', 'beta',
+            'crv', 'cuv',
             'CC.Coll', 'CSP.Coll',
             'activities',
         ],
@@ -1088,14 +1137,23 @@ def tabulize(ctx, view, reverse, limit):
 
         datum['alerts'] = ' '.join(alerts)
 
-        prices = (datum['200dma'], datum['50dma'], datum['price'])
-        score = util.numbers.growth_score(prices)
+        prices = (
+            datum['price'],
+            datum['50dma'],
+            datum['200dma'],
+        )
 
         p200, p50, p = prices
-        c = 'yellow'
-        if p > p50 > p200: c = 'green'
-        elif p < p50 < p200: c = 'red'
-        datum['ma'] = util.color.colored('%0.3f'%score, c)
+        mac = 'yellow'
+        if p > p50 > p200: mac = 'green'
+        elif p < p50 < p200: mac = 'red'
+        ma_score_color = lambda ma: util.color.colored('%0.3f' % ma, mac)
+
+        # MA: deviation from 0 means deviation from the worst-case scenario
+        datum['ma'] = util.numbers.growth_score(prices)
+
+        sentiments = stock.sentiments()
+        datum['analyst'] = D(sentiments['overall'] if sentiments else 0)
 
         cbu = stock.costbasis(realized=False)
         datum['cusq'] = cbu['short']['qty']
@@ -1159,12 +1217,13 @@ def tabulize(ctx, view, reverse, limit):
 
         # Use 'view' to multiplex 'rank' here, for now just using this one for all
         scores = {
-            'epst':             (50, normalize(datum['epst%'], D(1))),
-            'yesterchange':     (10, normalize(yesterchange, D(4))),
-            'since_close':      (10, normalize(datum['since_close'], D(4))),
-            'since_open':       (10, normalize(datum['since_open'], D(4))),
-            'bucket':           (10, normalize((eq/1000 - datum['bucket'])/13, 1) if datum['bucket'] > 0 else 1),
-            'totalchange':      (10, normalize(-totalchange, D(0.25))),
+            'epst':          (20, normalize(datum['epst%'], D(1))),
+            'ma':            (20, normalize(datum['ma'], D(1))),
+            'analyst':       (20, normalize(datum['analyst'], D(1))),
+            'yesterchange':  (10, normalize(yesterchange, D(4))),
+            'since_close':   (10, normalize(datum['since_close'], D(4))),
+            'since_open':    (10, normalize(datum['since_open'], D(4))),
+            'totalchange':   (10, normalize(-totalchange, D(0.25))),
         }
 
         if ticker in constants.DEBUG:
@@ -1201,6 +1260,7 @@ def tabulize(ctx, view, reverse, limit):
         'short': util.color.qty1,
         'premium_collected': util.color.mulla,
         'dividends_collected': util.color.mulla,
+        'ma': ma_score_color,
         'cuq': util.color.qty,
         'cuv': util.color.mulla,
         'crq': util.color.qty,
@@ -1213,6 +1273,7 @@ def tabulize(ctx, view, reverse, limit):
         'crsv': util.color.mulla,
         'crlq': util.color.qty,
         'crlv': util.color.mulla,
+        'analyst': util.color.qty,
     }
 
     table = BeautifulTable(maxwidth=300)

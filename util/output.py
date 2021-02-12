@@ -13,8 +13,10 @@ def dprintf(fmt, *args):
     print(fmt % args)
 
 
-def ddump(data, title=None, force=False):
-    def _dump(obj, title):
+def ddump(data, force=False):
+    if len(constants.DEBUG) == 0 and not force: return
+
+    def _dump(obj):
         class DecimalEncoder(json.JSONEncoder):
             def default(self, o):
                 if isinstance(o, decimal.Decimal):
@@ -23,27 +25,25 @@ def ddump(data, title=None, force=False):
                     return str(o)
                 return super(DecimalEncoder, self).default(o)
 
-        return '%s\n%s' % (
-            title, highlight(
-                json.dumps(obj, indent=4, cls=DecimalEncoder),
-                PythonLexer(),
-                Terminal256Formatter()
-            ),
+        return highlight(
+            json.dumps(obj, indent=4, cls=DecimalEncoder),
+            PythonLexer(),
+            Terminal256Formatter()
         )
 
-    if len(constants.DEBUG) == 0 and not force: return
-
-    title = '%s(%d entries)' % (f'{title} ' if title else '', len(data))
-    print(_dump(data, '[DEBUG:%s]-=[ %s ]=-' % (','.join(constants.DEBUG), title)))
+    print(_dump(data))
 
 
 class progress:
-    def __init__(self, *args, force=True):
+    def __init__(self, data, title=None, force=True):
+        self._data = data
         self._force = force
-        ddump(args, title='init', force=self._force)
+        self._title = '%s(%d entries)' % (f'{title} ' if title else '', len(data))
 
-    def __enter__(self, *args):
+    def __enter__(self):
         self._started_at = time.time()
+        print('[DEBUG:%s]-=[ %s ]=-' % (','.join(constants.DEBUG), self._title))
+        ddump(self._data, force=self._force)
 
     def __exit__(self, exctype, excval, exctraceback):
         self._stopped_at = time.time()
