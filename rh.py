@@ -35,14 +35,6 @@ from util.numbers import dec as D
 from util.output import ansistrip as S
 DS = lambda s: D(S(s))
 
-def fmt(f, d):
-    def fn(k):
-        try:
-            return f.get(k, str)(d.get(k, 'N/A'))
-        except:
-            raise RuntimeError(f'Invalid parameters for fmt; d={d.get(k, "N/A")}, k={k})')
-    return fn
-
 def conterm(fr, to=None):
     to = to if to is not None else util.datetime.now()
     delta = to - fr
@@ -1046,6 +1038,7 @@ VIEWS = {
         'sort_by': 'rank',
         'columns': [
             'ticker',
+            'marketcap',
             'rank', 'analyst', 'ma', 'epst%',
             'alerts',
             'pe_ratio', 'pb_ratio', 'beta',
@@ -1098,10 +1091,11 @@ VIEWS = {
 
 @cli.command(help='Views')
 @click.option('-v', '--view', default='pie', type=click.Choice(VIEWS.keys()))
+@click.option('-s', '--sort-by', default=False, type=str)
 @click.option('-r', '--reverse', default=False, is_flag=True, type=bool)
 @click.option('-l', '--limit', default=-1, type=int)
 @click.pass_context
-def tabulize(ctx, view, reverse, limit):
+def tabulize(ctx, view, sort_by, reverse, limit):
     account = ctx.obj['account']
     account.slurp()
 
@@ -1115,41 +1109,41 @@ def tabulize(ctx, view, reverse, limit):
         buy = stock[index]
         assert buy.side == 'buy'
 
-        alerts = []
+        def alerts(marketcap):
+            alerts = []
+            if marketcap is not None:
+                marketcap /= 1000000000
+                if marketcap > 10: sizestr = util.color.colored('L', 'green')
+                elif marketcap > 2:
+                    if 4 < marketcap < 5:
+                        sizestr = util.color.colored('M', 'magenta')
+                    else:
+                        sizestr = util.color.colored('M', 'blue')
+                else: sizestr = util.color.colored('S', 'yellow')
+            else:
+                marketcap, sizestr = Z, util.color.colored('U', 'red')
+            alerts.append('%s/%sB' % (sizestr, util.color.mulla(marketcap)))
+
+            datum['marketcap'] = marketcap
+
+            #if buy.term == 'st': alerts.append(util.color.colored('ST!', 'yellow'))
+            if stock.subject2washsale: alerts.append(util.color.colored('WS!', 'yellow'))
+            if datum['pe_ratio'].is_nan() or datum['pe_ratio'] < 10:
+                alerts.append(util.color.colored('PE<10', 'red'))
+
+            return alerts
 
         marketcap = datum['marketcap']
-        if marketcap is not None:
-            marketcap /= 1000000000
-            if marketcap > 10: sizestr = util.color.colored('L', 'green')
-            elif marketcap > 2:
-                if 4 < marketcap < 5:
-                    sizestr = util.color.colored('SWEET!', 'magenta')
-                else:
-                    sizestr = util.color.colored('M', 'blue')
-            else: sizestr = util.color.colored('S', 'yellow')
-        else:
-            marketcap, sizestr = Z, util.color.colored('?', 'red')
-        alerts.append('%s/%sB' % (sizestr, util.color.mulla(marketcap)))
-
-        #if buy.term == 'st': alerts.append(util.color.colored('ST!', 'yellow'))
-        if stock.subject2washsale: alerts.append(util.color.colored('WS!', 'yellow'))
-        if datum['pe_ratio'].is_nan() or datum['pe_ratio'] < 10: alerts.append(util.color.colored('PE!', 'red'))
-
-        datum['alerts'] = ' '.join(alerts)
-
-        prices = (
-            datum['price'],
-            datum['50dma'],
-            datum['200dma'],
-        )
-
-        p200, p50, p = prices
-        mac = 'yellow'
-        if p > p50 > p200: mac = 'green'
-        elif p < p50 < p200: mac = 'red'
-        ma_score_color = lambda ma: util.color.colored('%0.3f' % ma, mac)
+        datum['alerts'] = ' '.join(alerts(marketcap))
 
         # MA: deviation from 0 means deviation from the worst-case scenario
+        # TODO: formatter function can't take arguments at this time
+        prices = (datum['price'], datum['50dma'], datum['200dma'])
+        p, p50, p200 = prices
+        #mac = 'yellow'
+        #if p > p50 > p200: mac = 'green'
+        #elif p < p50 < p200: mac = 'red'
+        #ma_score_color = lambda ma: util.color.colored('%0.3f' % ma, mac)
         datum['ma'] = util.numbers.growth_score(prices)
 
         sentiments = stock.sentiments()
@@ -1208,34 +1202,25 @@ def tabulize(ctx, view, reverse, limit):
                 datum['short'] = util.numbers.rnd((eq - b) / datum['price'], round_to)
                 break
 
-        # Maps [-100/x .. +100/x] to [0 .. 100]
-        normalize = lambda p, x: (p*x+1)/2
-
         yesterchange = D(yesterday['marketChangeOverTime'])
         totalchange = D(datum['percent_change'])/100
         eq = D(datum['equity'])
 
         # Use 'view' to multiplex 'rank' here, for now just using this one for all
         scores = {
-            'epst':          (20, normalize(datum['epst%'], D(1))),
-            'ma':            (20, normalize(datum['ma'], D(1))),
-            'analyst':       (20, normalize(datum['analyst'], D(1))),
-            'yesterchange':  (10, normalize(yesterchange, D(4))),
-            'since_close':   (10, normalize(datum['since_close'], D(4))),
-            'since_open':    (10, normalize(datum['since_open'], D(4))),
-            'totalchange':   (10, normalize(-totalchange, D(0.25))),
+            'epst':          (20, util.numbers.scale_and_shift(datum['epst%'], D(1))),
+            'ma':            (20, util.numbers.scale_and_shift(datum['ma'], D(1))),
+            'analyst':       (20, util.numbers.scale_and_shift(datum['analyst'], D(1))),
+            'yesterchange':  (10, util.numbers.scale_and_shift(yesterchange, D(4))),
+            'since_close':   (10, util.numbers.scale_and_shift(datum['since_close'], D(4))),
+            'since_open':    (10, util.numbers.scale_and_shift(datum['since_open'], D(4))),
+            'totalchange':   (10, util.numbers.scale_and_shift(-totalchange, D(0.25))),
         }
+        datum['rank'] = sum([pct * min(100, score) for (pct, score) in scores.values()])
 
         if ticker in constants.DEBUG:
             print(util.output.ddump('scores', scores))
 
-        datum['rank'] = sum([pct * min(100, score) for (pct, score) in scores.values()])
-
-    #if constants.DEBUG:
-    #    for o in [o for o in account.cached('account', 'positions:all')]:
-    #        util.output.ddump(o, title='account:positions:all')
-    #    for o in [o for o in account.cached('options', 'positions:agg')]:
-    #        util.output.ddump(o, title='options.positions:agg')
 
     formats = {
         'bucket': lambda b: util.color.colored('$%dk' % b, 'blue'),
@@ -1247,6 +1232,7 @@ def tabulize(ctx, view, reverse, limit):
         'epst': util.color.mulla,                     # Earnings-Per-Share Traded
         'epst%': util.color.mpct,                     # Earnings-Per-Share Traded as % of current stock price
         'quantity': util.color.qty0,
+        'marketcap': util.color.mulla,
         'average_buy_price': util.color.mulla,
         'equity': util.color.mulla,
         'percent_change': util.color.pct,
@@ -1260,7 +1246,7 @@ def tabulize(ctx, view, reverse, limit):
         'short': util.color.qty1,
         'premium_collected': util.color.mulla,
         'dividends_collected': util.color.mulla,
-        'ma': ma_score_color,
+        'ma': util.color.qty,
         'cuq': util.color.qty,
         'cuv': util.color.mulla,
         'crq': util.color.qty,
@@ -1276,31 +1262,51 @@ def tabulize(ctx, view, reverse, limit):
         'analyst': util.color.qty,
     }
 
-    table = BeautifulTable(maxwidth=300)
-    table.set_style(BeautifulTable.STYLE_GRID)
-    table.columns.header = [h.replace('_', '\n') for h in VIEWS[view]['columns']]
-
-    if 'activate' in VIEWS[view]['columns']:
-        table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
-
-    for datum in account.data.values():
-        f = fmt(formats, datum)
-        table.rows.append([f(h) for h in VIEWS[view]['columns']])
-
-    sort_by, filter_by = (
-        VIEWS[view].get('sort_by', 'ticker'),
-        VIEWS[view].get('filter_by', None)
-    )
-
-    if filter_by is not None:
-        table = table.rows.filter(FILTERS[filter_by])
-
-    table.rows.sort(sort_by, reverse)
+    data = account.data.values()
+    table = mktable(data, view, formats, sort_by=sort_by, reverse=reverse, limit=limit)
+    print(table)
 
     if constants.DEBUG:
         print(table.rows.filter(lambda row: row['ticker'] in constants.DEBUG))
-    else:
-        print(table.rows[:limit] if limit > -1 else table)
+
+def mktable(data, view, formats, maxwidth=320, sort_by=None, reverse=False, limit=None):
+    columns = VIEWS[view]['columns']
+
+    # 0. create
+    table = BeautifulTable(maxwidth=maxwidth)
+
+    # 1. configure
+    table.set_style(BeautifulTable.STYLE_GRID)
+    table.columns.header = [h.replace('_', '\n') for h in columns]
+    if 'activate' in columns:
+        table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
+
+    # 2. populate
+    for datum in data:
+        table.rows.append(map(lambda k: datum.get(k, 'N/A'), columns))
+
+    # 3. filter
+    filter_by = VIEWS[view].get('filter_by', None)
+    if filter_by is not None:
+        table = table.rows.filter(FILTERS[filter_by])
+
+    # 4. sort
+    if not sort_by:
+        sort_by = VIEWS[view].get('sort_by', 'ticker')
+    table.rows.sort(key=sort_by, reverse=reverse)
+
+    # 5. limit
+    if limit > 0:
+        table = table.rows[:limit] if not reverse else table.rows[-limit:]
+
+    # 6. format
+    for index, column in enumerate(columns):
+        columns, fn = table.columns[index], formats.get(column, None)
+        if fn is not None:
+            columns = map(fn, columns)
+            table.columns[index] = columns
+
+    return table
 
 
 @cli.command(help='Account History')
