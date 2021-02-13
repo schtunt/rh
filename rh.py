@@ -732,11 +732,35 @@ class Account:
             datum['ticker'] = ticker
             datum['premium_collected'] = positions['premiums'][ticker]
             datum['dividends_collected'] = sum(D(div['amount']) for div in dividends[ticker])
-            datum['activities'] = '\n'.join(positions['activities'].get(ticker, []))
             datum['pe_ratio'] = D(fundamentals[ticker]['pe_ratio'])
             datum['pb_ratio'] = D(fundamentals[ticker]['pb_ratio'])
 
             datum['collateral'] = positions['collateral'][ticker]
+
+            opened = '\n'.join(positions['opened'].get(ticker, []))
+            closed = '\n'.join(positions['closed'].get(ticker, []))
+            datum['expiry'] = positions['next_expiry'].get(ticker, None)
+
+            datum['ttl'] = D(
+                999 if datum['expiry'] is None else (
+                    datum['expiry'] - util.datetime.now()
+                ).days
+            )
+
+            if opened and closed:
+                datum['activities'] = ('\n%s\n' % ('─'*32)).join((opened, closed))
+            elif opened:
+                datum['activities'] = opened
+            elif closed:
+                datum['activities'] = closed
+            else:
+                collateral = D(datum['collateral']['call'])
+                optionable = D(datum['quantity']) - collateral
+                datum['activities'] = (
+                    'N/A' if optionable < 100 else '%sx100 available' % (
+                        util.color.qty0(optionable // 100)
+                    )
+                )
 
             datum['marketcap'] = fifo.marketcap
 
@@ -760,26 +784,22 @@ class Account:
         return dict(zip(self.tickers, self.cached('stocks', 'prices', self.tickers)))
 
     def _get_positions(self):
+        next_expiry = {}
         data = self.cached('options', 'positions:all')
-
         collateral = defaultdict(lambda: {'put': Z, 'call': Z})
-        activities = defaultdict(list)
+        opened = defaultdict(list)
         for option in [o for o in data if D(o['quantity']) != Z]:
             ticker = option['chain_symbol']
 
             uri = option['option']
             instrument = self.cached('stocks', 'instrument', uri)
-            if instrument['state'] == 'expired':
-                pass
-            elif instrument['tradability'] == 'untradable':
-                raise
 
             premium = Z
             if instrument['state'] != 'queued':
                 premium -= D(option['quantity']) * D(option['average_price'])
 
             itype = instrument['type']
-            activities[ticker].append("%s %s %s x%s P=%s K=%s X=%s" % (
+            opened[ticker].append("%s %s %s x%s P=%s K=%s X=%s" % (
                 instrument['state'],
                 option['type'],
                 itype,
@@ -788,12 +808,18 @@ class Account:
                 util.color.mulla(instrument['strike_price']),
                 instrument['expiration_date'],
             ))
+            expiry = util.datetime.parse(instrument['expiration_date'])
+            if next_expiry.get(ticker) is None:
+                next_expiry[ticker] = expiry
+            else:
+                next_expiry[ticker] = min(next_expiry[ticker], expiry)
 
             collateral[ticker][itype] += 100 * D(dict(
                 put=instrument['strike_price'],
                 call=option['quantity']
             )[itype])
 
+        closed = defaultdict(list)
         premiums = defaultdict(lambda: Z)
         data = self.cached('orders', 'options:all')
         for option in [o for o in data if o['state'] not in ('cancelled')]:
@@ -834,7 +860,7 @@ class Account:
             premium *= -1 if option['direction'] == 'debit' else +1
             premiums[ticker] += premium
 
-            activities[ticker].append("%s %s %s x%s P=%s K=%s" % (
+            closed[ticker].append("%s %s %s x%s P=%s K=%s" % (
                 option['state'],
                 option['type'],
                 '/'.join(strategies),
@@ -844,13 +870,14 @@ class Account:
             ))
 
             for l in legs:
-                activities[ticker].append(' + l:%s' % l)
+                closed[ticker].append(' + l:%s' % l)
 
+        stocks = defaultdict(list)
         data = self.cached('orders', 'stocks:open')
         for order in data:
             uri = order['instrument']
             ticker = self.cached('stocks', 'instrument', uri, 'symbol')
-            activities[ticker].append("%s %s x%s @%s" % (
+            stocks[ticker].append("%s %s x%s @%s" % (
                 order['type'],
                 order['side'],
                 util.color.qty(order['quantity'], Z),
@@ -858,9 +885,12 @@ class Account:
             ))
 
         return dict(
+            stocks=stocks,
+            opened=opened,
+            closed=closed,
             premiums=premiums,
-            activities=activities,
             collateral=collateral,
+            next_expiry=next_expiry,
         )
 
     @connected
@@ -1074,6 +1104,7 @@ def markets(ctx, subarea):
 FILTERS = {
     'active': lambda d: len(d['activities']),
     'optionable': lambda d: DS(d['quantity']) - DS(d['CC.Coll']) > 100,
+    'expiry': lambda d: d != 'N/A',
 }
 
 VIEWS = {
@@ -1087,10 +1118,10 @@ VIEWS = {
             'equity', 'equity_change', 'percent_change',
             'premium_collected', 'dividends_collected',
             'short', 'bucket',
-            'rank', 'ma', 'since_close', 'since_open', 'alerts',
+            'since_close', 'since_open', 'alerts',
             'pe_ratio', 'pb_ratio', 'beta',
             'CC.Coll', 'CSP.Coll',
-            'activities',
+            'activities'
         ],
     },
     'losers': {
@@ -1098,7 +1129,8 @@ VIEWS = {
         'columns': [
             'ticker',
             'marketcap',
-            'rank', 'analyst', 'news', 'ma', 'epst%',
+            'rank', 'analyst', 'news', 'ma',
+            'epst%', 'epst', 'price', 'quantity',
             'alerts',
             'pe_ratio', 'pb_ratio', 'beta',
             'equity', 'equity_change', 'percent_change',
@@ -1109,7 +1141,7 @@ VIEWS = {
         ],
     },
      'gen': {
-        'sort_by': 'CC.Coll',
+        'sort_by': 'premium_collected',
         'filter_by': 'optionable',
         'columns': [
             'ticker', 'percentage',
@@ -1124,15 +1156,16 @@ VIEWS = {
         ],
     },
     'active': {
-        'sort_by': 'ticker',
-        'filter_by': 'active',
+        'sort_by': 'ttl',
+        'filter_by': 'expiry',
         'columns': [
             'ticker', 'percentage',
-            'price', 'quantity',
+            'quantity', 'price', 'epst', 'rank',
             'equity',
             'equity_change', 'percent_change',
             'premium_collected', 'dividends_collected',
             'activities',
+            'expiry', 'ttl'
         ],
     },
     'tax': {
@@ -1327,6 +1360,8 @@ def tabulize(ctx, view, sort_by, reverse, limit):
         'crlv': util.color.mulla,
         'analyst': util.color.qty,
         'news': util.color.qty,
+        'expiry': lambda dt: 'N/A' if dt is None else dt.strftime('%Y-%m-%d'),
+        'ttl': util.color.qty0,
     }
 
     data = account.data.values()
