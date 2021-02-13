@@ -955,7 +955,7 @@ class Account:
 
         return data
 
-    def cached(self, area, subarea, *args, **kwargs):
+    def cached(self, area, subarea, *args, force_refresh=False, **kwargs):
         endpoint = ROBIN_STOCKS_API[area][subarea]
         uniqname = '-'.join([
             area,
@@ -963,6 +963,8 @@ class Account:
             hashlib.sha1(','.join(map(str, args)).encode()).hexdigest(),
         ])
         cachefile = pathlib.Path(f'{constants.CACHE_DIR}/{uniqname}.pkl')
+        if force_refresh:
+            cachefile.unlink()
 
         data, age, fresh, this_second = {}, -1, False, util.datetime.now()
         while not fresh:
