@@ -34,6 +34,8 @@ from util.numbers import dec as D
 from util.output import ansistrip as S
 DS = lambda s: D(S(s))
 
+import cachetools
+
 def conterm(fr, to=None):
     to = to if to is not None else util.datetime.now()
     delta = to - fr
@@ -656,6 +658,8 @@ class Account:
         self.finnhub = None
         self.monkeylearn_api = None
         self.ml = None
+        self.alpha_vantage_api = None
+        self.av = None
 
         self.connect()
 
@@ -693,6 +697,7 @@ class Account:
                 self.iex_api_key,
                 self.finnhub_api_key,
                 self.monkeylearn_api,
+                self.alpha_vantage_api,
             ) = [ token.strip() for token in fh.readline().split(',') ]
 
             if self.robinhood is None:
@@ -955,6 +960,7 @@ class Account:
 
         return data
 
+    @cachetools.cached(cache=cachetools.TTLCache(maxsize=1024, ttl=600))
     def cached(self, area, subarea, *args, force_refresh=False, **kwargs):
         endpoint = ROBIN_STOCKS_API[area][subarea]
         uniqname = '-'.join([
@@ -982,7 +988,7 @@ class Account:
 
 RobinStocksEndpoint = namedtuple('RobinStocksEndpoint', ['ttl', 'function'])
 PolygonEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
-IEXFinanceEndpoint = namedtuple('PolygonEndpoint', ['ttl', 'function'])
+IEXFinanceEndpoint = namedtuple('IEXFinanceEndpoint', ['ttl', 'function'])
 YahooEarningsCalendarEndpoint = namedtuple('YahooEarningsCalendarEndpoint', ['ttl', 'function'])
 FinnhubEndpoint = namedtuple('FinnhubEndpoint', ['ttl', 'function'])
 MonkeyLearnEndpoint = namedtuple('MonkeyLearnEndpoint', ['ttl', 'model_id'])
@@ -1200,6 +1206,11 @@ def tabulize(ctx, view, sort_by, reverse, limit):
     for ticker, datum in account.data.items():
         stock = account.get_stock(ticker)
         index = stock.pointer
+
+        print(stock)
+        # Say you have a limit order on a stock for the very first time:
+        if len(stock.events) == 0: continue
+
         buy = stock[index]
         assert buy.side == 'buy'
 
