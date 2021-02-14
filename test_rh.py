@@ -1,27 +1,76 @@
-import rh
 import pytest
-
 import unittest
+import unittest.mock
+
+# Testing, no interwebz allowed
+import socket
+def suckit(*args, **kwargs):
+    raise Exception("Nice try, but no Interwebz for you!")
+socket.socket = suckit
+
+# Decorators must be mocked prior to they being imported anywhere
+import cachier
+dontcachier = lambda *args, **kwargs: lambda fn: fn
+unittest.mock.patch(target='cachier.cachier', new=dontcachier).start()
+
+# Follow-ups for mocking in Python, if things get more complicated
+# + https://alexmarandon.com/articles/python_mock_gotchas/
+# + https://docs.pylonsproject.org/projects/venusian/en/latest/
+
 from datetime import datetime, timezone
 
+import rh
+import api
+import stocks
+import account
 import util
 from util.numbers import dec as D
-import tests.fixtures
 
+import tests.fixtures
 
 
 @pytest.fixture(scope='module', autouse=True)
 def module_mock_initialize(module_mocker):
-    rh.preinitialize()
-    module_mocker.patch.object(rh, 'iex', unittest.mock.MagicMock())
-    module_mocker.patch.object(rh.Account, 'connect', lambda _: True)
-    with open('/tmp/stocks.csv', 'w') as fH:
+    cachefile = '/tmp/stocks.csv'
+    with open(cachefile, 'w') as fH:
         fH.write(CSV)
 
+    module_mocker.patch.object(api, 'download', unittest.mock.MagicMock(
+        return_value=cachefile
+    ))
+
+    module_mocker.patch.object(api, 'symbols', unittest.mock.MagicMock(
+        return_value=['AAPL']
+    ))
+
+    module_mocker.patch.object(api, 'rh', unittest.mock.MagicMock(**{
+        '%s.return_value' % fn: response
+            for fn, response in tests.fixtures.FIXTURES['rh'].items()
+    }))
+
+    module_mocker.patch.object(api.rh, 'stocks', unittest.mock.MagicMock(**{
+        '%s.return_value' % fn: response
+            for fn, response in tests.fixtures.FIXTURES['rh.stocks'].items()
+    }))
+
+    module_mocker.patch.object(api.rh, 'account', unittest.mock.MagicMock(**{
+        '%s.return_value' % fn: response
+            for fn, response in tests.fixtures.FIXTURES['rh.account'].items()
+    }))
+
+    module_mocker.patch.object(api, 'iex', unittest.mock.MagicMock(**{
+        'Stock.return_value.%s.return_value' % fn: response
+            for fn, response in tests.fixtures.FIXTURES['iex'].items()
+    }))
+
+    rh.preinitialize()
+
+
+
 def mkstonk(ticker):
-    account = rh.Account()
-    account.slurp()
-    aapl = account.get_stock(ticker)
+    acc = account.Account()
+    acc.slurp()
+    aapl = acc.get_stock(ticker)
     return aapl
 
 
@@ -38,20 +87,23 @@ prices = [
     D('61.6'),
 ]
 
-index2month = lambda i: 1+i%12
-index2year  = lambda i: 2020+(i//12)
-index2date  = lambda i: datetime(index2year(i), index2month(i), 20, 0, 0, tzinfo=timezone.utc)
+index2month = lambda i: 1 + i % 12
+index2year = lambda i: 2020 + (i // 12)
+index2date = lambda i: datetime(index2year(i), index2month(i), 20, 0, 0, tzinfo=timezone.utc)
+
+
 @pytest.fixture(scope='function', params=range(len(prices)))
 def index(mocker, request):
     index = request.param
-    mocker.patch.object(rh.util.datetime, 'now', lambda: index2date(index))
+
     return index
 
+
 index2price = lambda i: prices[i]
+
+
 @pytest.fixture(scope='function')
 def price(mocker, index):
-    tests.fixtures.MOCKED_APIS['stocks:prices'][0] = '%9.6f' % index2price(index)
-    mocker.patch.object(rh.Account, 'cached', tests.fixtures.cached)
     return index2price(index)
 
 
@@ -72,26 +124,37 @@ ANSWER_KEYS = [
     'cnt', 'ptr', 'trd', 'qty', 'epst', 'crsq', 'crsv', 'crlq', 'crlv', 'cusq', 'cusv', 'culq', 'culv'
 ]
 
+
 @pytest.fixture(scope='function', params=ANSWER_KEYS)
 def key(request):
     return request.param
+
 
 def answers(index, price):
     p = price
     return {
         key: D([
-            (1, 0,  100, 100,             0,   0,    0, 0, 0, 100,    0, 0, 0),
-            (2, 0,  200, 200,             5,   0,    0, 0, 0, 200, 1000, 0, 0),
-            (3, 0,  200, 100,            35, 100, 4000, 0, 0, 100, 3000, 0, 0),
-            (4, 1,  200,   0,          42.5, 200, 8500, 0, 0,   0,    0, 0, 0),
-            (5, 1,  300, 100,     85/D('3'), 200, 8500, 0, 0, 100,    0, 0, 0),
-            (6, 4,  300,  99,    115/D('3'), 201, 8530, 0, 0,  99, 2970, 0, 0),
-            (7, 4, 1200, 396,   115/D('12'), 804, 8530, 0, 0, 396, 2970, 0, 0),
-            (8, 4, 1204, 400, 1447/D('120'), 804, 8530, 0, 0, 396, 5940, 0, 0),
+            (1, 0, 100,  100,               0,   0,    0, 0, 0, 100,    0, 0, 0),
+            (2, 0, 200,  200,               5,   0,    0, 0, 0, 200, 1000, 0, 0),
+            (3, 0, 200,  100,              35, 100, 4000, 0, 0, 100, 3000, 0, 0),
+            (4, 1, 200,    0,            42.5, 200, 8500, 0, 0,   0,    0, 0, 0),
+            (5, 1, 300,  100,     85 / D('3'), 200, 8500, 0, 0, 100,    0, 0, 0),
+            (6, 4, 300,   99,    115 / D('3'), 201, 8530, 0, 0,  99, 2970, 0, 0),
+            (7, 4, 1200, 396,   115 / D('12'), 804, 8530, 0, 0, 396, 2970, 0, 0),
+            (8, 4, 1204, 400, 1447 / D('120'), 804, 8530, 0, 0, 396, 5940, 0, 0),
         ][index][j]) for j, key in enumerate(ANSWER_KEYS)
     }
 
-def test_stock(index, price, key):
+
+@unittest.mock.patch('util.datetime.now')
+@unittest.mock.patch('api.rh.stocks.get_latest_price')
+@unittest.mock.patch('api.iex.Stock.return_value.get_price')
+def test_stock(get_price, get_latest_price, now, index, price, key):
+    get_price.return_value = index2price(index)
+    get_latest_price.return_value = [index2price(index)]
+    now.return_value = index2date(index)
+
+    assert account.util.datetime.now() == index2date(index)
     if index > 7: return
 
     aapl = mkstonk('AAPL')

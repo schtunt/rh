@@ -9,6 +9,8 @@ from pygments import highlight
 from pygments.lexers import PythonLexer
 from pygments.formatters import Terminal256Formatter
 
+from beautifultable import BeautifulTable
+
 import constants
 
 def dprintf(fmt, *args):
@@ -58,6 +60,47 @@ class progress:
         delta = self._stopped_at - self._started_at
         if delta > 3:
             print("%d seconds" % delta)
+
+
+def mktable(data, view, formats, maxwidth=320, sort_by=None, reverse=False, limit=None):
+    columns = VIEWS[view]['columns']
+
+    # 0. create
+    table = BeautifulTable(maxwidth=maxwidth)
+
+    # 1. configure
+    table.set_style(BeautifulTable.STYLE_GRID)
+    table.columns.header = [h.replace('_', '\n') for h in columns]
+    if 'activate' in columns:
+        table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
+
+    # 2. populate
+    for datum in data:
+        table.rows.append(map(lambda k: datum.get(k, 'N/A'), columns))
+
+    # 3. filter
+    filter_by = VIEWS[view].get('filter_by', None)
+    if filter_by is not None:
+        table = table.rows.filter(FILTERS[filter_by])
+
+    # 4. sort
+    if not sort_by:
+        sort_by = VIEWS[view].get('sort_by', 'ticker')
+    table.rows.sort(key=sort_by, reverse=reverse)
+
+    # 5. limit
+    if limit > 0:
+        table = table.rows[:limit] if not reverse else table.rows[-limit:]
+
+    # 6. format
+    for index, column in enumerate(columns):
+        columns, fn = table.columns[index], formats.get(column, None)
+        if fn is not None:
+            columns = map(fn, columns)
+            table.columns[index] = columns
+
+    return table
+
 
 RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 def ansistrip(s):

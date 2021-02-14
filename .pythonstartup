@@ -1,10 +1,11 @@
 import rh
-import importlib
+import api
+import account
 
+import importlib
 def relmod():
-    global rh
-    rh = importlib.reload(rh)
+    importlib.reload(rh)
+    importlib.reload(api)
+    importlib.reload(account)
 
 rh.interact()
-account = rh.acc
-util = rh.util

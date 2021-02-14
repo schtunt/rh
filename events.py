@@ -64,9 +64,9 @@ class TransactionEvent(Event):
 
     def price(self, when=None):
         price = self._price
-        if not when: return price
+        if when is None: return price
 
-        for splitter in self.stock.splitters:
+        for splitter in self.stock.splits:
             if self.timestamp <= splitter.timestamp <= when:
                 price = splitter.reverse(price)
 
@@ -74,9 +74,9 @@ class TransactionEvent(Event):
 
     def quantity(self, when=None):
         quantity = self._quantity
-        if not when: return quantity
+        if when is None: return quantity
 
-        for splitter in self.stock.splitters:
+        for splitter in self.stock.splits:
             if self.timestamp <= splitter.timestamp <= when:
                 quantity = splitter.forward(quantity)
 
