@@ -62,7 +62,7 @@ class progress:
             print("%d seconds" % delta)
 
 
-def mktable(data, view, formats, maxwidth=320, sort_by=None, reverse=False, limit=None):
+def mktable(VIEWS, data, view, formats, maxwidth=320, sort_by=None, reverse=False, limit=None):
     columns = VIEWS[view]['columns']
 
     # 0. create
@@ -75,7 +75,7 @@ def mktable(data, view, formats, maxwidth=320, sort_by=None, reverse=False, limi
         table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
 
     # 2. populate
-    for datum in data:
+    for i, datum in data:
         table.rows.append(map(lambda k: datum.get(k, 'N/A'), columns))
 
     # 3. filter
@@ -86,6 +86,7 @@ def mktable(data, view, formats, maxwidth=320, sort_by=None, reverse=False, limi
     # 4. sort
     if not sort_by:
         sort_by = VIEWS[view].get('sort_by', 'ticker')
+
     table.rows.sort(key=sort_by, reverse=reverse)
 
     # 5. limit
@@ -94,10 +95,14 @@ def mktable(data, view, formats, maxwidth=320, sort_by=None, reverse=False, limi
 
     # 6. format
     for index, column in enumerate(columns):
-        columns, fn = table.columns[index], formats.get(column, None)
+        rows, fn = table.columns[index], formats.get(column, None)
         if fn is not None:
-            columns = map(fn, columns)
-            table.columns[index] = columns
+            try:
+                casted_rows = list(map(fn, rows))
+                table.columns[index] = casted_rows
+            except:
+                print("Failed to cast values in column %s" % column, list(rows))
+                raise
 
     return table
 

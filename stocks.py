@@ -1,8 +1,12 @@
 from collections import defaultdict
+from functools import reduce
 
 import util
 from util.numbers import dec as D
 from constants import ZERO as Z
+
+import cachier
+import datetime
 
 import api
 import lots
@@ -26,13 +30,20 @@ class Stock:
         self.pointer = 0
         self.events = []
 
+        self.splits = [
+            events.StockSplitEvent(
+                stock=self,
+                date=ss['exDate'],
+                divisor=ss['fromFactor'],
+                multiplier=ss['toFactor'],
+            ) for ss in api.splits(self.ticker)
+        ]
 
         # StockSplits - These splits take effect whenever the query date and the buy date
         # lie on different sides of the split date.  That means, that the buy event needs to
         # know "who's asking", or more specifically, "when's asking?", in order to answer
         # correctly.
-        self._pool = self.splits + self._events()
-
+        self._pool = self.splits[:]
 
 
     def __getitem__(self, i):
@@ -45,30 +56,6 @@ class Stock:
             util.color.mulla(self.epst()),
             util.color.mulla(self.price),
         )
-
-    @property
-    def splits(self):
-        return [
-            events.StockSplitEvent(
-                stock=self,
-                date=ss['exDate'],
-                divisor=ss['fromFactor'],
-                multiplier=ss['toFactor'],
-            ) for ss in api.splits(self.ticker)
-        ]
-
-    def _events(self):
-         return [
-            events.TransactionEvent(
-                self,
-                ec['quantity'],
-                ec['price'],
-                ec['side'],
-                se['updated_at'],
-                se['type'],
-            ) for se in api.events(self.ticker)
-                for ec in se['equity_components']
-        ]
 
     @property
     def earnings(self):
@@ -153,7 +140,7 @@ class Stock:
         result = api.sentiments(self.news)
 
         # filter out unnecessary data
-        data = [e for ee in map(lambda e: e['classifications'], result.body) for e in ee]
+        data = [e for ee in map(lambda e: e['classifications'], result) for e in ee]
 
         def l(e, ee):
              e[ee['tag_name']] += D(ee['confidence'])
@@ -224,19 +211,19 @@ class Stock:
     def subject2washsale(self):
         '''<now> <-- >30d? --> <current> <-- >30d? --> <last>'''
 
-        thirty = util.datetime.timedelta(days=30, seconds=0)
         transactions = self.transactions
-        current, last = None, None
+        current, last = next(transactions), None
         try:
-            while True: last, current = next(transactions), next(transactions)
+            while True:
+                last, current = current, next(transactions)
         except StopIteration:
             pass
 
         assert current is not None
 
-        if (util.datetime.now() - current.timestamp) <= thirty: return True
-        if last and (current.timestamp - last.timestamp) > thirty: return False
-        return True
+        if util.datetime.delta(current.timestamp) <= util.datetime.A_MONTH: return True
+        if last and util.datetime.delta(last.timestamp, current.timestamp) <= util.datetime.A_MONTH: return True
+        return False
 
     @property
     def recommendations(self):
@@ -287,7 +274,7 @@ class Stock:
 
         return costbasis
 
-    def push(self, transaction):
+    def ledger(self, transaction):
         self._pool.append(transaction)
         self._pool.sort(key=lambda e: e.timestamp)
         event = None
@@ -301,23 +288,23 @@ class Stock:
                     self._quantity -= event.quantity()
                 else:
                     self._quantity += event.quantity()
-            elif type(event) is events.StockSplitEvent:
+                self.events.append(event)
+            elif type(event) is events.StockSplitEvent and self._quantity != Z:
                 self._quantity = event.forward(self._quantity)
+                self.events.append(event)
 
-            self.events.append(event)
-
+            # This is used only for unit testing, bit expensive
             now = util.datetime.now()
-
-            # Ledger for unit-testing
             cbr = self.costbasis(realized=True, when=now)
             cbu = self.costbasis(realized=False, when=now)
+
             self._ledger.append({
                 'cnt':  len(self.events),
                 'dts':  transaction.timestamp,
                 'trd':  self.traded(when=now),
                 'qty':  self._quantity,
                 'ptr':  self.pointer,
-                'epst': self.epst(when=now),
+                'esp':  self.esp(when=now), # Effective Share Price
                 'crsq': cbr['short']['qty'],
                 'crsv': cbr['short']['value'],
                 'crlq': cbr['long']['qty'],
@@ -328,11 +315,33 @@ class Stock:
                 'culv': cbu['long']['value'],
             })
 
-    def epst(self, when=None, dividends=False, premiums=False):
+        # This following data will end up in the DataFrame and saved
+        now = util.datetime.now()
+        cbr = self.costbasis(realized=True, when=now)
+        cbu = self.costbasis(realized=False, when=now)
+        return {
+            'cnt':  len(self.events),
+            'dts':  transaction.timestamp,
+            'trd':  self.traded(when=now),
+            'qty':  self._quantity,
+            'ptr':  self.pointer,
+            'esp':  self.esp(when=now),
+            'crsq': cbr['short']['qty'],
+            'crsv': cbr['short']['value'],
+            'crlq': cbr['long']['qty'],
+            'crlv': cbr['long']['value'],
+            'cusq': cbu['short']['qty'],
+            'cusv': cbu['short']['value'],
+            'culq': cbu['long']['qty'],
+            'culv': cbu['long']['value'],
+        }
+
+    def esp(self, when=None, dividends=False, premiums=False):
         '''
-        On average, how much has each stock earned *you* the investor, per share ever traded,
-        after taking into account everything that has happened to stocks held by you - capital
-        gains, capital losses, dividends, and premiums collected and forfeited on options.
+        On average, how much has each stock cost/made for the investor, per share ever traded,
+        by that invester.  This number is calculated by taking into account everything that has
+        happened to stocks held by the investor - capital gains, capital losses, dividends, and
+        premiums collected and forfeited on the option market.
         '''
         realized = self.costbasis(realized=True, when=when)
         unrealized = self.costbasis(realized=False, when=when)
@@ -355,7 +364,7 @@ class Stock:
                 qty += costbasis[term]['qty']
 
         if dividends:
-            divs = self.account.dividends()[self.ticker]
+            divs = api.dividends()[self.ticker]
             value += sum(D(div['amount']) for div in divs)
 
         if premiums:

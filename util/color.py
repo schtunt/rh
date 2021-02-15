@@ -24,5 +24,8 @@ qty1 = lambda q: qty(q, 1)
 # Currency
 def mulla(m):
     m = D(m)
-    c = 'red' if m < 0 else 'green' if m > 0 else 'yellow'
-    return colored(locale.currency(D(m), grouping=True), c)
+    if not m.is_nan():
+        c = 'red' if m < 0 else 'green' if m > 0 else 'yellow'
+        return colored(locale.currency(m, grouping=True), c)
+    else:
+        return colored(m, 'red')

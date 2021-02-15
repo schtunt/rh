@@ -1,6 +1,7 @@
 import util
 from util.numbers import dec as D
 
+from constants import ZERO as Z
 
 class Event:
     ident = 0
@@ -26,14 +27,24 @@ class Event:
 
 
 class TransactionEvent(Event):
-    def __init__(self, stock, qty, price, side, timestamp, otype):
+    def __init__(self, stock, dfrow, fulfillment_buy=None):
         super().__init__(stock)
 
-        self.side = side
-        self._quantity = D(qty)
-        self._price = D(price)
-        self.timestamp = util.datetime.dtp.parse(timestamp)
-        self.otype = otype
+        if fulfillment_buy is None:
+            self.side = dfrow.side
+            self._quantity = dfrow.quantity
+            self._price = dfrow.average_price
+            self.timestamp = dfrow.date
+            self.otype = dfrow.order_type
+        else:
+            self.side = 'buy'
+            self._quantity = fulfillment_buy
+            self._price = Z
+            self.timestamp = util.datetime.datetime(
+                2020, 1, 1, 0, 0, tzinfo=util.datetime.timezone.utc
+            )
+            self.otype = 'free'
+
 
     def __repr__(self):
         price = self.price()

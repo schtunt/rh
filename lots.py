@@ -19,14 +19,7 @@ class Lot:
             # Bad data from robinhood; workaround
             if stock.pointer == len(stock.events):
                 stock.events.append(
-                    events.TransactionEvent(
-                        stock,
-                        required,
-                        0.00,
-                        'buy',
-                        str(util.datetime.datetime(2020, 1, 1, 0, 0, tzinfo=util.datetime.timezone.utc)),
-                        'FREE',
-                    )
+                    events.TransactionEvent(stock, None, fulfillment_buy=required)
                 )
 
             event = stock.events[stock.pointer]

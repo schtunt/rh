@@ -17,10 +17,12 @@ unittest.mock.patch(target='cachier.cachier', new=dontcachier).start()
 # + https://alexmarandon.com/articles/python_mock_gotchas/
 # + https://docs.pylonsproject.org/projects/venusian/en/latest/
 
+import os
 from datetime import datetime, timezone
 
 import rh
 import api
+import slurp
 import account
 from util.numbers import dec as D
 
@@ -32,6 +34,11 @@ def module_mock_initialize(module_mocker):
     cachefile = '/tmp/stocks.csv'
     with open(cachefile, 'w') as fH:
         fH.write(CSV)
+
+    slurp.FEATHERS.update({
+        'transactions': '/tmp/test-transactions.feather',
+        'stocks': '/tmp/test-stocks.feather',
+    })
 
     module_mocker.patch.object(api, 'download', unittest.mock.MagicMock(
         return_value=cachefile
@@ -64,12 +71,10 @@ def module_mock_initialize(module_mocker):
     rh.preinitialize()
 
 
-
-def mkstonk(ticker):
-    acc = account.Account()
-    acc.slurp()
-    aapl = acc.get_stock(ticker)
-    return aapl
+@pytest.fixture(scope='module', params=['AAPL'])
+def stock(module_mocker, request):
+    ticker = request.param
+    return account.Account().get_stock(ticker)
 
 
 prices = [
@@ -119,7 +124,8 @@ AAPL,2020-01-01T19:58:29.368490Z,market,buy,0.00,100.00000000,100.00000000
 '''
 
 ANSWER_KEYS = [
-    'cnt', 'ptr', 'trd', 'qty', 'epst', 'crsq', 'crsv', 'crlq', 'crlv', 'cusq', 'cusv', 'culq', 'culv'
+    'cnt', 'ptr', 'trd', 'qty', 'esp',
+    'crsq', 'crsv', 'crlq', 'crlv', 'cusq', 'cusv', 'culq', 'culv'
 ]
 
 
@@ -152,11 +158,11 @@ def test_stock(get_price, get_latest_price, now, index, price, key):
     get_latest_price.return_value = [index2price(index)]
     now.return_value = index2date(index)
 
-    assert account.util.datetime.now() == index2date(index)
+    #assert account.util.datetime.now() == index2date(index)
     if index > 7: return
 
-    aapl = mkstonk('AAPL')
-    ledger = aapl._ledger[index]
+    stock = account.Account().get_stock('AAPL')
+    ledger = stock._ledger[index]
     answer = answers(index, price)
 
     assert ledger[key] == answer[key]
