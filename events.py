@@ -1,6 +1,3 @@
-import constants
-from constants import ZERO as Z
-
 import util
 from util.numbers import dec as D
 

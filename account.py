@@ -1,6 +1,3 @@
-import os
-import pathlib
-
 from collections import defaultdict
 
 import api

@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 
 import os, sys, locale
-import click, json
-
-from functools import reduce
-
-from datetime import datetime, timedelta, timezone
+import click
 
 import pathlib
 
@@ -16,8 +12,6 @@ from constants import ZERO as Z
 
 import api
 import account
-import lots
-import events
 
 import util
 from util.numbers import dec as D
