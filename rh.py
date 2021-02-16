@@ -169,10 +169,10 @@ def tabulize(ctx, view, sort_by, reverse, limit):
         reverse=reverse,
         limit=limit
     )
-    print(table)
+    util.output.prtable(table)
 
     if constants.DEBUG:
-        print(table.rows.filter(lambda row: row['ticker'] in constants.DEBUG))
+        util.output.prtable(table.rows.filter(lambda row: row['ticker'] in constants.DEBUG))
 
     api.measurements()
 
@@ -181,8 +181,9 @@ def tabulize(ctx, view, sort_by, reverse, limit):
 @click.pass_context
 def history(ctx):
     account = ctx.obj['account']
-    for ticker, stock in account.stocks.items():
+    for ticker, stock in account.portfolio:
         if len(constants.DEBUG) > 0 and ticker not in constants.DEBUG: continue
+        print(stock)
         stock.summarize()
 
 def preinitialize(repl=False):

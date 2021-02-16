@@ -1,6 +1,7 @@
 import os
 
 from collections import defaultdict
+from functools import reduce
 import pandas as pd
 import datetime
 
@@ -16,6 +17,16 @@ FEATHERS = {
     'transactions': '/tmp/transactions.feather',
     'stocks': '/tmp/stocks.feather',
 }
+
+def embelish(obj, attributes, column, chain):
+    obj[column] = [
+        reduce(
+            lambda g, f: f(g),
+            chain,
+            components,
+        ) for components in zip(*map(lambda attr: getattr(obj, attr), attributes))
+    ]
+
 
 def transactions():
     feather = FEATHERS['transactions']
@@ -36,7 +47,7 @@ def transactions():
         average_price=D,
     ))
 
-    print("3. Update the dataframe with realized options contracts...")
+    print("3. Update the DataFrame with position-altering options contracts...")
     # Update the dataframe with stocks bought and sold via the options market:
     for ticker in api.symbols():
         for se in api.events(ticker):
@@ -146,7 +157,6 @@ def stocks(transactions, portfolio):
 
         d50ma=D,
         d200ma=D,
-        ma=D,
 
         y5cp=D,
         y2cp=D,
@@ -215,7 +225,7 @@ def stocks(transactions, portfolio):
         next_expiry = next_expiries.get(ticker, None)
         data.append(dict(
             ticker=ticker,
-            price=holding['price'],
+            price=prices[ticker],
             quantity=holding['quantity'],
             average_buy_price=holding['average_buy_price'],
             equity=holding['equity'],
@@ -247,11 +257,6 @@ def stocks(transactions, portfolio):
             marketcap=stock.marketcap,
             d50ma=D(stock.stats['day50MovingAvg']),
             d200ma=D(stock.stats['day200MovingAvg']),
-            ma=util.numbers.growth_score((
-                D(stock.stats['day200MovingAvg']),
-                D(stock.stats['day50MovingAvg']),
-                prices[ticker],
-            )),
             y5cp=D(stock.stats['year5ChangePercent']),
             y2cp=D(stock.stats['year2ChangePercent']),
             y1cp=D(stock.stats['year1ChangePercent']),

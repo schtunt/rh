@@ -1,5 +1,5 @@
 .venv
-stocks.csv
-options.csv
-__pycache__
 .cached
+.idea/
+.ipynb_checkpoints/
+**/__pycache__

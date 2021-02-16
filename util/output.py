@@ -61,6 +61,11 @@ class progress:
         if delta > 3:
             print("%d seconds" % delta)
 
+def prtable(table):
+    columns = table.columns.header
+    table.columns.header = [h.replace('_', '\n') for h in columns]
+    print(table)
+    table.columns.header = columns
 
 def mktable(VIEWS, data, view, formats, maxwidth=320, sort_by=None, reverse=False, limit=None):
     columns = VIEWS[view]['columns']
@@ -70,7 +75,7 @@ def mktable(VIEWS, data, view, formats, maxwidth=320, sort_by=None, reverse=Fals
 
     # 1. configure
     table.set_style(BeautifulTable.STYLE_GRID)
-    table.columns.header = [h.replace('_', '\n') for h in columns]
+    table.columns.header = columns
     if 'activate' in columns:
         table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
 

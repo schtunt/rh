@@ -53,7 +53,7 @@ class Stock:
         return '<Stock %s x %s @ mean unit cost of %s and current equity of %s>' % (
             self.ticker,
             util.color.qty(self._quantity),
-            util.color.mulla(self.epst()),
+            util.color.mulla(self.esp()),
             util.color.mulla(self.price),
         )
 
