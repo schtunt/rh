@@ -207,8 +207,8 @@ PRICES = {}
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @measure
 def prices(tickers=None):
-    prices = rh.stocks.get_latest_price(symbols())
-    PRICES.update(dict(zip(symbols(), map(D, prices))))
+    for tickers in util.chunk(symbols(), 100):
+        PRICES.update(dict(zip(tickers, iex.Stock(tickers))))
     return PRICES
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))

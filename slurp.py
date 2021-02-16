@@ -9,6 +9,7 @@ import api
 import constants
 import util
 import events
+from progress.bar import ShadyBar
 
 from util.numbers import dec as D
 from constants import ZERO as Z
@@ -16,6 +17,7 @@ from constants import ZERO as Z
 FEATHERS = {
     'transactions': '/tmp/transactions.feather',
     'stocks': '/tmp/stocks.feather',
+    'objects': '/tmp/objects.feather',
 }
 
 def embelish(obj, attributes, column, chain):
@@ -49,20 +51,23 @@ def transactions():
 
     print("3. Update the DataFrame with position-altering options contracts...")
     # Update the dataframe with stocks bought and sold via the options market:
-    for ticker in api.symbols():
-        for se in api.events(ticker):
-            for ec in se['equity_components']:
-                df.append(
-                    dict(
-                        symbol=ticker,
-                        date=se['updated_at'],
-                        order_type=se['type'],
-                        side=ec['side'],
-                        fees=Z,
-                        quantity=ec['quantity'],
-                        average_price=ec['price'],
-                    ), ignore_index=True
-                )
+    symbols = api.symbols()
+    with ShadyBar('Processing', max=len(symbols)) as bar:
+        for ticker in symbols:
+            for se in api.events(ticker):
+                for ec in se['equity_components']:
+                    df.append(
+                        dict(
+                            symbol=ticker,
+                            date=se['updated_at'],
+                            order_type=se['type'],
+                            side=ec['side'],
+                            fees=Z,
+                            quantity=ec['quantity'],
+                            average_price=ec['price'],
+                        ), ignore_index=True
+                    )
+            bar.next()
 
     print("4. Sort the dataframe before returning it")
     df = df.sort_values(by='date')
@@ -74,12 +79,29 @@ def transactions():
     return df
 
 def embelish_transactions(df, portfolio):
-    for _, dfrow in df.iterrows():
-        ticker = dfrow.symbol
-        stock = portfolio[ticker]
-        transaction = events.TransactionEvent(stock, dfrow)
-        for key, val in stock.ledger(transaction).items():
-            dfrow[key] = val
+    feather = FEATHERS['objects']
+    if os.path.exists(feather):
+        print("0. Returned DataFrame from %s and return immediately" % feather)
+        df = pd.read_parquet(feather)
+        return df
+
+    print("1. Embelish DataFrame...")
+    with ShadyBar('Processing', max=len(df)) as bar:
+        for i, dfrow in df.iterrows():
+            ticker = dfrow.symbol
+            stock = portfolio[ticker]
+            transaction = events.TransactionEvent(stock, dfrow)
+            for key, val in stock.ledger(transaction).items():
+                dfrow[key] = val
+
+            bar.next()
+
+    if 'test' not in feather:
+        print("2. Dump to feather")
+        df.to_parquet(feather)
+
+    return df
+
 
 def stocks(transactions, portfolio):
     feather = FEATHERS['stocks']
@@ -169,103 +191,106 @@ def stocks(transactions, portfolio):
     )
 
     data = []
-    for ticker, stock in portfolio.items():
-        print(f"8.1. [{ticker}] Update the dataframe")
-        if ticker not in holdings:
-            print("8.1.1 Skipping stock no longer held - %s" % ticker)
-            continue
+    with ShadyBar('Processing', max=len(len(portfolio))) as bar:
+        for ticker, stock in portfolio.items():
+            print(f"8.1. [{ticker}] Update the dataframe")
+            if ticker not in holdings:
+                print("8.1.1 Skipping stock no longer held - %s" % ticker)
+                continue
 
-        holding = holdings[ticker]
+            holding = holdings[ticker]
 
-        print(f"8.2. [{ticker}] Cost Basis (realized)")
-        cbr = stock.costbasis(realized=True, when=now)
-        crsq = cbr['short']['qty']
-        crsv = cbr['short']['value']
-        crlq = cbr['long']['qty']
-        crlv = cbr['long']['value']
+            print(f"8.2. [{ticker}] Cost Basis (realized)")
+            cbr = stock.costbasis(realized=True, when=now)
+            crsq = cbr['short']['qty']
+            crsv = cbr['short']['value']
+            crlq = cbr['long']['qty']
+            crlv = cbr['long']['value']
 
-        print(f"8.3. [{ticker}] Cost Basis (unrealized)")
-        cbu = stock.costbasis(realized=False, when=now)
-        cusq = cbu['short']['qty']
-        cusv = cbu['short']['value']
-        culq = cbu['long']['qty']
-        culv = cbu['long']['value']
+            print(f"8.3. [{ticker}] Cost Basis (unrealized)")
+            cbu = stock.costbasis(realized=False, when=now)
+            cusq = cbu['short']['qty']
+            cusv = cbu['short']['value']
+            culq = cbu['long']['qty']
+            culv = cbu['long']['value']
 
-        print(f"8.4. [{ticker}] Fundamentals (if missing)")
-        if ticker not in fundamentals:
-            fundamentals[ticker] = api.fundamental(ticker)
+            print(f"8.4. [{ticker}] Fundamentals (if missing)")
+            if ticker not in fundamentals:
+                fundamentals[ticker] = api.fundamental(ticker)
 
-        print(f"8.5. [{ticker}] Prices (if missing)")
-        if ticker not in prices:
-            prices[ticker] = api.price(ticker)
+            print(f"8.5. [{ticker}] Prices (if missing)")
+            if ticker not in prices:
+                prices[ticker] = api.price(ticker)
 
-        #print("8.6. [{ticker}] Activities blob")
-        #_opened = '\n'.join(opened.get(ticker, []))
-        #_closed = '\n'.join(closed.get(ticker, []))
-        #if _opened and _closed:
-        #    activities = ('\n%s\n' % ('─' * 32)).join((_opened, _closed))
-        #elif opened:
-        #    activities = _opened
-        #elif closed:
-        #    activities = _closed
-        #else:
-        #    collateral = D(collaterals[ticker]['call'])
-        #    optionable = D(holding['quantity']) - collateral
-        #    activities = (
-        #        'N/A' if optionable < 100 else '%sx100 available' % (
-        #            util.color.qty0(optionable // 100)
-        #        )
-        #    )
-        activities = 'N/A'
+            #print("8.6. [{ticker}] Activities blob")
+            #_opened = '\n'.join(opened.get(ticker, []))
+            #_closed = '\n'.join(closed.get(ticker, []))
+            #if _opened and _closed:
+            #    activities = ('\n%s\n' % ('─' * 32)).join((_opened, _closed))
+            #elif opened:
+            #    activities = _opened
+            #elif closed:
+            #    activities = _closed
+            #else:
+            #    collateral = D(collaterals[ticker]['call'])
+            #    optionable = D(holding['quantity']) - collateral
+            #    activities = (
+            #        'N/A' if optionable < 100 else '%sx100 available' % (
+            #            util.color.qty0(optionable // 100)
+            #        )
+            #    )
+            activities = 'N/A'
 
-        collateral = collaterals[ticker]
-        premium = premiums[ticker]
-        fundamental = fundamentals[ticker]
-        dividend = dividends[ticker]
-        next_expiry = next_expiries.get(ticker, None)
-        data.append(dict(
-            ticker=ticker,
-            price=prices[ticker],
-            quantity=holding['quantity'],
-            average_buy_price=holding['average_buy_price'],
-            equity=holding['equity'],
-            percent_change=holding['percent_change'],
-            equity_change=holding['equity_change'],
-            type=holding['type'],
-            name=holding['name'],
-            pe_ratio=holding['pe_ratio'],
-            percentage=holding['percentage'],
-            cnt=len(stock.events),
-            trd=stock.traded(),
-            qty=stock._quantity,
-            esp=stock.esp(),
-            crsq=crsq,
-            crsv=crsv,
-            crlq=crlq,
-            crlv=crlv,
-            cusq=cusq,
-            cusv=cusv,
-            culq=culq,
-            culv=culv,
-            premium_collected=premium,
-            dividends_collected=sum(D(div['amount']) for div in dividend),
-            pe_ratio2=D(fundamental['pe_ratio']),
-            pb_ratio=D(fundamental['pb_ratio']),
-            collateral_call=D(collateral['call']),
-            collateral_put=D(collateral['put']),
-            next_expiry=next_expiry,
-            marketcap=stock.marketcap,
-            d50ma=D(stock.stats['day50MovingAvg']),
-            d200ma=D(stock.stats['day200MovingAvg']),
-            y5cp=D(stock.stats['year5ChangePercent']),
-            y2cp=D(stock.stats['year2ChangePercent']),
-            y1cp=D(stock.stats['year1ChangePercent']),
-            m6cp=D(stock.stats['month6ChangePercent']),
-            m3cp=D(stock.stats['month3ChangePercent']),
-            m1cp=D(stock.stats['month1ChangePercent']),
-            d30cp=D(stock.stats['day30ChangePercent']),
-            d5cp=D(stock.stats['day5ChangePercent']),
-        ))
+            collateral = collaterals[ticker]
+            premium = premiums[ticker]
+            fundamental = fundamentals[ticker]
+            dividend = dividends[ticker]
+            next_expiry = next_expiries.get(ticker, None)
+            data.append(dict(
+                ticker=ticker,
+                price=prices[ticker],
+                quantity=holding['quantity'],
+                average_buy_price=holding['average_buy_price'],
+                equity=holding['equity'],
+                percent_change=holding['percent_change'],
+                equity_change=holding['equity_change'],
+                type=holding['type'],
+                name=holding['name'],
+                pe_ratio=holding['pe_ratio'],
+                percentage=holding['percentage'],
+                cnt=len(stock.events),
+                trd=stock.traded(),
+                qty=stock._quantity,
+                esp=stock.esp(),
+                crsq=crsq,
+                crsv=crsv,
+                crlq=crlq,
+                crlv=crlv,
+                cusq=cusq,
+                cusv=cusv,
+                culq=culq,
+                culv=culv,
+                premium_collected=premium,
+                dividends_collected=sum(D(div['amount']) for div in dividend),
+                pe_ratio2=D(fundamental['pe_ratio']),
+                pb_ratio=D(fundamental['pb_ratio']),
+                collateral_call=D(collateral['call']),
+                collateral_put=D(collateral['put']),
+                next_expiry=next_expiry,
+                marketcap=stock.marketcap,
+                d50ma=D(stock.stats['day50MovingAvg']),
+                d200ma=D(stock.stats['day200MovingAvg']),
+                y5cp=D(stock.stats['year5ChangePercent']),
+                y2cp=D(stock.stats['year2ChangePercent']),
+                y1cp=D(stock.stats['year1ChangePercent']),
+                m6cp=D(stock.stats['month6ChangePercent']),
+                m3cp=D(stock.stats['month3ChangePercent']),
+                m1cp=D(stock.stats['month1ChangePercent']),
+                d30cp=D(stock.stats['day30ChangePercent']),
+                d5cp=D(stock.stats['day5ChangePercent']),
+            ))
+
+            bar.next()
 
     print("9. Import Python data to Pandas DataFrame")
     df = pd.DataFrame(
