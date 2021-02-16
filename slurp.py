@@ -14,11 +14,12 @@ from progress.bar import ShadyBar
 from util.numbers import dec as D
 from constants import ZERO as Z
 
+
 FEATHERS = {
     'transactions': '/tmp/transactions.feather',
     'stocks': '/tmp/stocks.feather',
-    'objects': '/tmp/objects.feather',
 }
+
 
 def embelish(obj, attributes, column, chain):
     obj[column] = [
@@ -31,16 +32,21 @@ def embelish(obj, attributes, column, chain):
 
 
 def transactions():
+    '''
+    DataFrame Update 1 - Stock information pulled from Robinhood CSV
+
+    DataFrame Update 2 - Options information pulled from Robinhood
+    '''
     feather = FEATHERS['transactions']
     if os.path.exists(feather):
         print("0. Returned DataFrame from %s and return immediately" % feather)
         df = pd.read_parquet(feather)
         return df
 
-    print("1. Download the CSV data from Robinhood...")
+    print("1. Download Stock Transactions from Robinhood...")
     imported = api.download('stocks')
 
-    print("2. Create the Pandas DataFrame object...")
+    print("2. Import Stock Transaction data to Pandas DataFrame")
     header = pd.read_csv(imported, comment='#', nrows=0).columns
     df = pd.read_csv(imported, comment='#', converters=dict(
         date=util.datetime.dtp.parse,
@@ -49,7 +55,7 @@ def transactions():
         average_price=D,
     ))
 
-    print("3. Update the DataFrame with position-altering options contracts...")
+    print("3. Update Stocks Transaction history with position-altering Options Contracts...")
     # Update the dataframe with stocks bought and sold via the options market:
     symbols = api.symbols()
     with ShadyBar('Processing', max=len(symbols)) as bar:
@@ -69,26 +75,30 @@ def transactions():
                     )
             bar.next()
 
-    print("4. Sort the dataframe before returning it")
+    print("4. Sort DataFrame")
     df = df.sort_values(by='date')
 
     if 'test' not in feather:
-        print("5. Dump to feather")
+        print("5. Dump DataFrame to Feather")
         df.to_parquet(feather)
 
     return df
 
-def embelish_transactions(df, portfolio):
-    feather = FEATHERS['objects']
-    if os.path.exists(feather):
-        print("0. Returned DataFrame from %s and return immediately" % feather)
-        df = pd.read_parquet(feather)
-        return df
 
-    print("1. Embelish DataFrame...")
-    with ShadyBar('Processing', max=len(df)) as bar:
+def _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(df, portfolio):
+    '''
+    Create local Python Stock objects, and links between them, and their corresponding
+    Lots and LotConnectors
+
+    DataFrame Update 3 - Ledger Data
+    '''
+    with ShadyBar('Linking', max=len(df)) as bar:
         for i, dfrow in df.iterrows():
             ticker = dfrow.symbol
+            if ticker not in portfolio:
+                bar.next()
+                continue
+
             stock = portfolio[ticker]
             transaction = events.TransactionEvent(stock, dfrow)
             for key, val in stock.ledger(transaction).items():
@@ -96,16 +106,41 @@ def embelish_transactions(df, portfolio):
 
             bar.next()
 
-    if 'test' not in feather:
-        print("2. Dump to feather")
-        df.to_parquet(feather)
 
-    return df
+def _stock_orders():
+    orders = defaultdict(list)
+    data = api.orders('stocks', 'open')
+    for order in data:
+        uri = order['instrument']
+        ticker = api.ticker(uri)
+        orders[ticker].append("%s %s x%s @%s" % (
+            order['type'],
+            order['side'],
+            util.color.qty(order['quantity'], Z),
+            util.color.mulla(order['price']),
+        ))
+
+    return stocks,
 
 
-def stocks(transactions, portfolio):
+def stocks(transactions, portfolio, portfolio_is_complete):
+    '''
+    DataFrame Update 4 - Addtional columns added here from Stock Object calls or other APIs
+    '''
+
     feather = FEATHERS['stocks']
-    if os.path.exists(feather):
+    cache_exists = os.path.exists(feather)
+    if not (portfolio_is_complete and cache_exists):
+        # The `write' flag implies that the portfolio dataset is not partial (only contains
+        # select tickers).  If a cache file does not exists already, that means this is the
+        # time to create it.  For that to happen, the expensive linking process needs to take
+        # place here.
+        print("0. Create and link Python Stock objects, then slurp Stock ledgers to DataFrame...")
+        _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(
+            transactions,
+            portfolio
+        )
+    elif cache_exists:
         print("0. Returned DataFrame from %s and return immediately" % feather)
         df = pd.read_parquet(feather)
         return df
@@ -175,6 +210,7 @@ def stocks(transactions, portfolio):
         collateral_call=D,
         collateral_put=D,
         next_expiry=datetime.datetime,
+        ttl=D,
         marketcap=D,
 
         d50ma=D,
@@ -191,34 +227,35 @@ def stocks(transactions, portfolio):
     )
 
     data = []
-    with ShadyBar('Processing', max=len(len(portfolio))) as bar:
+    with ShadyBar('Processing', max=len(portfolio)) as bar:
         for ticker, stock in portfolio.items():
-            print(f"8.1. [{ticker}] Update the dataframe")
+            #print(f"8.1. [{ticker}] Update the dataframe")
             if ticker not in holdings:
-                print("8.1.1 Skipping stock no longer held - %s" % ticker)
+                #print("8.1.1 Skipping stock no longer held - %s" % ticker)
+                bar.next()
                 continue
 
             holding = holdings[ticker]
 
-            print(f"8.2. [{ticker}] Cost Basis (realized)")
+            #print(f"8.2. [{ticker}] Cost Basis (realized)")
             cbr = stock.costbasis(realized=True, when=now)
             crsq = cbr['short']['qty']
             crsv = cbr['short']['value']
             crlq = cbr['long']['qty']
             crlv = cbr['long']['value']
 
-            print(f"8.3. [{ticker}] Cost Basis (unrealized)")
+            #print(f"8.3. [{ticker}] Cost Basis (unrealized)")
             cbu = stock.costbasis(realized=False, when=now)
             cusq = cbu['short']['qty']
             cusv = cbu['short']['value']
             culq = cbu['long']['qty']
             culv = cbu['long']['value']
 
-            print(f"8.4. [{ticker}] Fundamentals (if missing)")
+            #print(f"8.4. [{ticker}] Fundamentals (if missing)")
             if ticker not in fundamentals:
                 fundamentals[ticker] = api.fundamental(ticker)
 
-            print(f"8.5. [{ticker}] Prices (if missing)")
+            #print(f"8.5. [{ticker}] Prices (if missing)")
             if ticker not in prices:
                 prices[ticker] = api.price(ticker)
 
@@ -246,6 +283,7 @@ def stocks(transactions, portfolio):
             fundamental = fundamentals[ticker]
             dividend = dividends[ticker]
             next_expiry = next_expiries.get(ticker, None)
+            ttl = util.datetime.delta(now, next_expiry).days if next_expiry else -1
             data.append(dict(
                 ticker=ticker,
                 price=prices[ticker],
@@ -277,6 +315,7 @@ def stocks(transactions, portfolio):
                 collateral_call=D(collateral['call']),
                 collateral_put=D(collateral['put']),
                 next_expiry=next_expiry,
+                ttl=ttl,
                 marketcap=stock.marketcap,
                 d50ma=D(stock.stats['day50MovingAvg']),
                 d200ma=D(stock.stats['day200MovingAvg']),
@@ -301,8 +340,18 @@ def stocks(transactions, portfolio):
     print("10. Sort the DataFrame")
     df = df.sort_values(by='ticker')
 
-    if 'test' not in feather:
+    if not cache_exists and portfolio_is_complete and 'test' not in feather:
         print("11. Dump to feather")
+        df.to_parquet(feather)
+    elif not portfolio_is_complete and cache_exists:
+        # Update the main Feather DataFrame (on-disk) with the partial data we just
+        # retrieved.
+        print("11. Partial update and dump to feather")
+        dfm = pd.read_parquet(feather)
+        columns = list(dfm.columns)
+        dfm.set_index(keys=columns, inplace=True)
+        dfm.update(df.set_index(columns))
+        dfm.reset_index()
         df.to_parquet(feather)
 
     return df
@@ -357,8 +406,7 @@ def _option_orders():
     for option in [o for o in data if o['state'] not in ('cancelled')]:
         ticker = option['chain_symbol']
 
-        if ticker in constants.DEBUG:
-            util.output.ddump(option, title='orders.options:all')
+        util.output.ddump(option)
 
         strategies = []
         o, c = option['opening_strategy'], option['closing_strategy']
@@ -375,8 +423,7 @@ def _option_orders():
             uri = leg['option']
             instrument = api.instrument(uri)
 
-            if ticker in constants.DEBUG:
-                util.output.ddump(instrument, title=f'stocks:instrument({uri})')
+            util.output.ddump(instrument)
 
             legs.append('%s to %s K=%s X=%s' % (
                 leg['side'],
@@ -408,18 +455,3 @@ def _option_orders():
         closed=closed,
         premiums=premiums,
     )
-
-def _stock_orders():
-    orders = defaultdict(list)
-    data = api.orders('stocks', 'open')
-    for order in data:
-        uri = order['instrument']
-        ticker = api.ticker(uri)
-        orders[ticker].append("%s %s x%s @%s" % (
-            order['type'],
-            order['side'],
-            util.color.qty(order['quantity'], Z),
-            util.color.mulla(order['price']),
-        ))
-
-    return stocks,

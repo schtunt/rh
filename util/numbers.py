@@ -8,6 +8,7 @@ nan = decimal.Decimal('NaN')
 
 std = lambda n: dec(np.std(n))
 mean = lambda n: dec(np.mean(n))
+ident = lambda n: n
 
 # Maps [-100/x .. +100/x] to [0 .. 100]
 scale_and_shift = lambda p, x: (p*x+1)/2

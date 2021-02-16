@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import os, sys, locale
+import pathlib
 import click
 
-import pathlib
+import pandas as pd
 
 import __main__
 
@@ -19,18 +20,26 @@ from util.output import ansistrip as S
 DS = lambda s: D(S(s))
 
 @click.group()
-@click.option('-D', '--debug-tickers',multiple=True,  default=None)
+@click.option('-D', '--debug', is_flag=True, default=False)
+@click.option('-C', '--clear-cache', is_flag=True, default=False)
 @click.pass_context
-def cli(ctx, debug_tickers):
-    constants.DEBUG=debug_tickers
+def cli(ctx, debug, clear_cache):
     ctx.ensure_object(dict)
+    ctx.obj['debug'] = debug
+
+    if clear_cache:
+        from slurp import FEATHERS
+        for fn in FEATHERS.values():
+            if os.path.exists(fn):
+                os.unlink(fn)
+
 
 CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 
 FILTERS = {
     'active': lambda d: len(d['activities']),
     'optionable': lambda d: DS(d['quantity']) - DS(d['CC.Coll']) > 100,
-    'expiry': lambda d: d != 'N/A',
+    'next_expiry': lambda d: d['next_expiry'] is not pd.NaT
 }
 
 VIEWS = {
@@ -65,6 +74,7 @@ VIEWS = {
             #'crv', 'cuv',
             #'CC.Coll', 'CSP.Coll',
             'activities',
+            'trd0',
         ],
     },
      'gen': {
@@ -84,7 +94,7 @@ VIEWS = {
     },
     'active': {
         'sort_by': 'ttl',
-        'filter_by': 'expiry',
+        'filter_by': 'next_expiry',
         'columns': [
             'ticker', 'percentage',
             'quantity', 'price', 'esp',
@@ -92,7 +102,7 @@ VIEWS = {
             'equity_change', 'percent_change',
             'premium_collected', 'dividends_collected',
             'activities',
-            'expiry', 'ttl'
+            'next_expiry', 'ttl'
         ],
     },
     'tax': {
@@ -147,59 +157,62 @@ FORMATERS = {
     'crlv': util.color.mulla,
     'analyst': util.color.qty,
     'news': util.color.qty,
-    'expiry': lambda dt: 'N/A' if dt is None else dt.strftime('%Y-%m-%d'),
+    'next_expiry': util.datetime.short,
     'ttl': util.color.qty0,
+    'trd0': util.datetime.days,
 }
 
 
 @cli.command(help='Views')
+@click.option('-t', '--tickers', multiple=True, default=None)
 @click.option('-v', '--view', default='pie', type=click.Choice(VIEWS.keys()))
 @click.option('-s', '--sort-by', default=False, type=str)
 @click.option('-r', '--reverse', default=False, is_flag=True, type=bool)
 @click.option('-l', '--limit', default=-1, type=int)
 @click.pass_context
-def tabulize(ctx, view, sort_by, reverse, limit):
-    account = ctx.obj['account']
+def tabulize(ctx, view, sort_by, reverse, limit, tickers):
+    debug = ctx.obj['debug']
+    acc = account.Account(tickers)
+
+    filter_by = VIEWS[view].get('filter_by', None)
+    if filter_by is not None:
+        filter_by = FILTERS[filter_by]
+
     table = util.output.mktable(
         VIEWS,
-        account.stocks,
+        acc.stocks,
         view,
         FORMATERS,
+        tickers=tickers,
+        filter_by=filter_by,
         sort_by=sort_by,
         reverse=reverse,
         limit=limit
     )
     util.output.prtable(table)
 
-    if constants.DEBUG:
-        util.output.prtable(table.rows.filter(lambda row: row['ticker'] in constants.DEBUG))
-
     api.measurements()
 
 
 @cli.command(help='Account History')
+@click.option('-t', '--tickers', multiple=True, required=True)
 @click.pass_context
-def history(ctx):
-    account = ctx.obj['account']
-    for ticker, stock in account.portfolio:
-        if len(constants.DEBUG) > 0 and ticker not in constants.DEBUG: continue
+def history(ctx, tickers):
+    debug = ctx.obj['debug']
+    acc = account.Account(tickers)
+
+    for ticker, stock in acc.portfolio:
         print(stock)
         stock.summarize()
 
-def preinitialize(repl=False):
-    api.connect()
-    locale.setlocale(locale.LC_ALL, '')
-    if not pathlib.posixpath.exists(constants.CACHE_DIR):
-        os.mkdir(constants.CACHE_DIR)
+    api.measurements()
+
 
 acc = None
 def interact():
-    print("Preparing REPL...")
-    preinitialize(repl=True)
-
     print("Initializing APIs...")
     global acc
-    acc = account.Account()
+    acc = account.Account(tickers)
 
     #print(acc.rh.authentication.getpass.getuser())
 
@@ -223,19 +236,16 @@ def interact():
     print("Meta-helpers for this REPL")
     print(" + relmod()         (reload wthout having to exit the repl)")
 
+
+def preinitialize(repl=False):
+    api.connect()
+    locale.setlocale(locale.LC_ALL, '')
+    if not pathlib.posixpath.exists(constants.CACHE_DIR):
+        os.mkdir(constants.CACHE_DIR)
+
+
 if __name__ == '__main__':
-    preinitialize()
-    cli(obj={'account': account.Account()})
+    preinitialize(repl=True)
+    cli()
 elif not hasattr(__main__, '__file__'):
     interact()
-
-'''
-In [38]: [x['symbol'] for x in api.iex.get_market_losers()]
-Out[38]: ['FOLD', 'SMTI', 'TUFN', 'ONCR', 'SQZ', 'GMBL', 'FDMT', 'RELI', 'ACB']
-
-In [40]: [x['symbol'] for x in api.iex.get_market_gainers()]
-Out[40]: ['WNW', 'PRTA', 'CCNC']
-
-api.iex.get_market_most_active()
-
-'''

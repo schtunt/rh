@@ -50,11 +50,11 @@ class Stock:
         return self.events[i]
 
     def __repr__(self):
-        return '<Stock %s x %s @ mean unit cost of %s and current equity of %s>' % (
+        return '<Stock %s - %s x %s @ ESP of %s>' % (
             self.ticker,
             util.color.qty(self._quantity),
-            util.color.mulla(self.esp()),
             util.color.mulla(self.price),
+            util.color.mulla(self.esp()),
         )
 
     @property

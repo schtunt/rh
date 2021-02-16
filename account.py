@@ -2,32 +2,62 @@ import api
 import stocks
 import slurp
 
+import pandas as pd
+
 import util
 from util.numbers import dec as D
 
 class Account:
-    def __init__(self):
-        print("A. Create Stock objects for all tickers in Robinhood account")
-        self._portfolio = {
-            ticker: stocks.Stock(self, ticker)
-            for ticker in api.symbols()
-        }
-
-        print("B. Slurp CSV and generate Transactions DataFrame")
+    def __init__(self, tickers=()):
         self._transactions = slurp.transactions()
 
-        print("C. Embelish I: Slurp the APIs and embelish the TransactionEvents")
-        slurp.embelish_transactions(self._transactions, self._portfolio)
+        portfolio_is_complete = bool(len(tickers) == 0)
 
-        print("D. Embelish II: Slurp the APIs and embelish the Stocks DataFrame")
-        self._stocks = slurp.stocks(self._transactions, self._portfolio)
+        self._portfolio = {
+            ticker: stocks.Stock(self, ticker)
+            for ticker in (
+                api.symbols() if portfolio_is_complete else tickers
+            )
+        }
 
-        print("E. Embelish III: Additional ad-hoc embelishments, if any")
+        util.output.ddump({
+            'complete?'       : portfolio_is_complete,
+        }, force=True)
+
+        self._stocks = slurp.stocks(
+            self._transactions,
+            self._portfolio,
+            portfolio_is_complete=portfolio_is_complete,
+        )
+
+        S = self._stocks
+        T = self._transactions
+
         slurp.embelish(
-            obj=self._stocks,
-            attributes=('d200ma', 'd50ma', 'price'),
+            obj=S,
+            attributes=('d200ma', 'd50ma', 'price',),
             column='ma',
-            chain=(util.numbers.growth_score, D)
+            chain=(util.numbers.growth_score, D),
+        )
+
+        slurp.embelish(
+            obj=S,
+            attributes=('ticker',),
+            column='trd0',
+            chain=(
+                lambda attrs: T[T['symbol'] == attrs[0]].date,
+                lambda dates: min(dates) if len(dates) else pd.NaT,
+            )
+        )
+
+        slurp.embelish(
+            obj=S,
+            attributes=('ticker',),
+            column='trd0',
+            chain=(
+                lambda attrs: T[T['symbol'] == attrs[0]].date,
+                lambda dates: min(dates) if len(dates) else pd.NaT,
+            )
         )
 
     def get_stock(self, ticker):

@@ -152,16 +152,20 @@ def answers(index, price):
 
 @unittest.mock.patch('util.datetime.now')
 @unittest.mock.patch('api.rh.stocks.get_latest_price')
-@unittest.mock.patch('api.iex.Stock.return_value.get_price')
-def test_stock(get_price, get_latest_price, now, index, price, key):
-    get_price.return_value = index2price(index)
-    get_latest_price.return_value = [index2price(index)]
+@unittest.mock.patch('api.price')
+@unittest.mock.patch('api.prices')
+def test_stock(iex_prices, iex_price, rh_get_latest_price, now, index, price, key):
+    iex_price.return_value = price
+    iex_prices.return_value = { 'AAPL': price }
+
+    rh_get_latest_price.return_value = [ price ]
     now.return_value = index2date(index)
 
     #assert account.util.datetime.now() == index2date(index)
     if index > 7: return
 
-    stock = account.Account().get_stock('AAPL')
+    acc = account.Account(tickers=['AAPL'])
+    stock = acc.get_stock('AAPL')
     ledger = stock._ledger[index]
     answer = answers(index, price)
 

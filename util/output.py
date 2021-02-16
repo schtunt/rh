@@ -18,7 +18,9 @@ def dprintf(fmt, *args):
 
 
 def ddump(data, force=False):
-    if len(constants.DEBUG) == 0 and not force: return
+    # Need to pass in some debug flag
+    if force is False:
+        return
 
     def _dump(obj):
         class DecimalEncoder(json.JSONEncoder):
@@ -42,11 +44,11 @@ class progress:
     def __init__(self, data, title=None, force=True):
         self._data = data
         self._force = force
-        self._title = '%s(%d entries)' % (f'{title} ' if title else '', len(data))
+        self._title = '%s(%d entries)' % (title, len(data)) if title else ''
 
     def __enter__(self):
         self._started_at = time.time()
-        print('[DEBUG:%s]-=[ %s ]=-' % (','.join(constants.DEBUG), self._title))
+        print('[DEBUG]-=[ %s ]=-', self._title)
         ddump(self._data, force=self._force)
 
     def __exit__(self, exctype, excval, exctraceback):
@@ -67,7 +69,18 @@ def prtable(table):
     print(table)
     table.columns.header = columns
 
-def mktable(VIEWS, data, view, formats, maxwidth=320, sort_by=None, reverse=False, limit=None):
+def mktable(
+    VIEWS,
+    data,
+    view,
+    formats,
+    maxwidth=320,
+    tickers=(),
+    filter_by=None,
+    sort_by=None,
+    reverse=False,
+    limit=None
+):
     columns = VIEWS[view]['columns']
 
     # 0. create
@@ -84,9 +97,10 @@ def mktable(VIEWS, data, view, formats, maxwidth=320, sort_by=None, reverse=Fals
         table.rows.append(map(lambda k: datum.get(k, 'N/A'), columns))
 
     # 3. filter
-    filter_by = VIEWS[view].get('filter_by', None)
     if filter_by is not None:
-        table = table.rows.filter(FILTERS[filter_by])
+        table = table.rows.filter(filter_by)
+    if len(tickers) > 0:
+        table = table.rows.filter(lambda row: row['ticker'] in tickers)
 
     # 4. sort
     if not sort_by:

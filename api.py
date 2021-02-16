@@ -2,17 +2,21 @@ from functools import wraps
 from time import time
 from collections import defaultdict
 import util
+from util.numbers import dec as D
+
 #import gc
 #gc.disable()
-MEASURED = defaultdict(int)
+
+MEASURED = defaultdict(lambda: dict(count=0, time=0))
 def measure(func):
     @wraps(func)
     def timed(*args, **kwargs):
-        start = int(round(time() * 1000))
+        start = D(time())
         try:
             return func(*args, **kwargs)
         finally:
-            MEASURED[func.__name__] += int(round(time() * 1000)) - start
+            MEASURED[func.__name__]['count'] += 1
+            MEASURED[func.__name__]['time'] += D(time()) - start
     return timed
 
 def measurements():
@@ -28,7 +32,6 @@ import cachier
 import hashlib
 
 import util
-from util.numbers import dec as D
 import constants
 
 import robin_stocks as rh
@@ -204,19 +207,29 @@ def ticker(uri):
     return rh.stocks.get_name_by_url(uri).upper()
 
 PRICES = {}
-@cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @measure
 def prices(tickers=None):
-    for tickers in util.chunk(symbols(), 100):
-        PRICES.update(dict(zip(tickers, iex.Stock(tickers))))
-    return PRICES
+    if len(PRICES) == 0:
+        missing = symbols()
+    else:
+        missing = symbols() if tickers is None else [
+            ticker for ticker in tickers if ticker not in PRICES
+        ]
 
-@cachier.cachier(stale_after=datetime.timedelta(hours=3))
+    for chunk in util.chunk(missing, 100):
+        PRICES.update({
+            ticker: D(price)
+            for ticker, price in iex.Stock(chunk).get_price().items()
+        })
+
+    return PRICES if tickers is None else {
+        ticker: PRICES[ticker] for ticker in tickers
+    }
+
 @measure
 def price(ticker):
     if ticker not in PRICES:
-        stock = iex_stock(ticker)
-        PRICES[ticker] = D(stock.get_price())
+        _ = prices(tickers=[ticker])
     return PRICES[ticker]
 
 FUNDAMENTALS = {}
