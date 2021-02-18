@@ -2,7 +2,6 @@ import scipy as sp
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import statistics
 import math
 
 import importlib
@@ -11,6 +10,7 @@ import rh
 import api
 import util
 import util.debug
+import slurp
 import events
 import stocks
 import account
@@ -26,10 +26,12 @@ def relmod():
     importlib.reload(api)
     importlib.reload(account)
     importlib.reload(stocks)
+    importlib.reload(slurp)
     importlib.reload(events)
     importlib.reload(util)
     importlib.reload(util.debug)
     importlib.reload(util.color)
     importlib.reload(util.output)
 
+rh.preinitialize()
 rh.repl()

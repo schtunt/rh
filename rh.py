@@ -6,8 +6,6 @@ import click
 
 import pandas as pd
 
-import __main__
-
 import constants
 from constants import ZERO as Z
 
@@ -39,62 +37,47 @@ CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 FILTERS = {
     'active': lambda d: len(d['activities']),
     'optionable': lambda d: DS(d['quantity']) - DS(d['CC.Coll']) > 100,
-    'next_expiry': lambda d: d['next_expiry'] is not pd.NaT
+    'next_expiry': lambda d: d['next_expiry'] is not pd.NaT,
+    'soon_expiring': lambda d: d['next_expiry'] is not pd.NaT and util.datetime.ttl(d['next_expiry']) < 7,
+    'movers': lambda d: abs(d['change']) >= 5,
 }
 
 VIEWS = {
-    'pie': {
-        'sort_by': 'ticker',
-        'columns': [
-            'ticker', 'percentage',
-            'quantity', 'price',
-            'esp',
-            'ma',
-            'equity', 'equity_change', 'percent_change',
-            'premium_collected', 'dividends_collected',
-            'short', 'bucket',
-            'since_close', 'since_open', 'alerts',
-            'pe_ratio', 'pb_ratio', #'beta',
-            #'CC.Coll', 'CSP.Coll',
-            'activities'
-        ],
-    },
-    'losers': {
-        'sort_by': 'ticker',
+    'movers': {
+        'sort_by': 'change',
+        'filter_by': 'movers',
         'columns': [
             'ticker',
             'marketcap',
-            'ma', 'd200ma', 'd50ma', 'price',
+            'ma', 'd200ma', 'd50ma', 'pcp', 'price',
+            'change',
             'esp',
             'quantity',
             'alerts',
-            'pe_ratio', 'pb_ratio', #'beta',
+            'pe_ratio', 'pb_ratio', 'beta',
             'equity', 'equity_change', 'percent_change',
             'premium_collected', 'dividends_collected',
-            #'crv', 'cuv',
-            #'CC.Coll', 'CSP.Coll',
             'activities',
             'trd0',
-        ],
-    },
-     'gen': {
-        'sort_by': 'premium_collected',
-        'filter_by': 'optionable',
-        'columns': [
-            'ticker', 'percentage',
-            'quantity', 'price',
-            'esp',
-            'equity', 'equity_change', 'percent_change',
-            'premium_collected', 'dividends_collected',
-            'ma', 'since_close', 'since_open', 'alerts',
-            'pe_ratio', 'pb_ratio', #'beta',
-            #'CC.Coll', 'CSP.Coll',
-            'activities',
         ],
     },
     'active': {
         'sort_by': 'urgency',
         'filter_by': 'next_expiry',
+        'columns': [
+            'ticker', 'percentage',
+            'quantity', 'price', 'esp',
+            'equity',
+            'equity_change', 'percent_change',
+            'premium_collected', 'dividends_collected',
+            'activities',
+            'next_expiry',
+            'urgency',
+        ],
+    },
+    'expiring': {
+        'sort_by': 'urgency',
+        'filter_by': 'soon_expiring',
         'columns': [
             'ticker', 'percentage',
             'quantity', 'price', 'esp',
@@ -126,6 +109,8 @@ FORMATERS = {
     'CC.Coll': util.color.qty0,                   # Covered Call Collateral
     'CSP.Coll': util.color.mulla,                 # Cash-Secured Put Collateral
     'price': util.color.mulla,
+    'pcp': util.color.mulla,                      # Previous Close Price (PCP)
+    'change': util.color.pct,                     # Change since PCP
     'esp': util.color.mulla,                      # Effective Share Price
     'quantity': util.color.qty0,
     'marketcap': util.color.mulla,
@@ -166,13 +151,14 @@ FORMATERS = {
 
 @cli.command(help='Views')
 @click.option('-t', '--tickers', multiple=True, default=None)
-@click.option('-v', '--view', default='pie', type=click.Choice(VIEWS.keys()))
+@click.option('-v', '--view', default='expiring', type=click.Choice(VIEWS.keys()))
 @click.option('-s', '--sort-by', default=False, type=str)
 @click.option('-r', '--reverse', default=False, is_flag=True, type=bool)
 @click.option('-l', '--limit', default=-1, type=int)
 @click.pass_context
 def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     debug = ctx.obj['debug']
+    tickers = [t.upper() for t in tickers]
     acc = account.Account(tickers)
 
     filter_by = VIEWS[view].get('filter_by', None)
@@ -242,6 +228,3 @@ def preinitialize():
 if __name__ == '__main__':
     preinitialize()
     cli()
-elif hasattr(__main__, '__file__'):
-    preinitialize()
-    repl()

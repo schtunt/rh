@@ -32,6 +32,22 @@ def embelish(obj, attributes, column, chain):
     ]
 
 
+def update(column, data):
+    '''
+    data: dict() keyed by ticker
+    '''
+    feather = FEATHERS['stocks']
+    if not os.path.exists(feather):
+        return False
+
+    df = pd.read_parquet(feather)
+    dfcol = pd.DataFrame(data.items(), columns=('ticker', column))
+    df[column] = dfcol[column].combine_first(df[column])
+    df.reset_index(inplace=True)
+    df.to_parquet(feather)
+    return True
+
+
 def transactions():
     '''
     DataFrame Update 1 - Stock information pulled from Robinhood CSV
@@ -151,8 +167,9 @@ def stocks(transactions, portfolio, portfolio_is_complete):
     print("1. Pull holdings")
     holdings = api.holdings()
 
-    print("2. Pull Prices")
-    prices = api.prices()
+    print("2. Pull Prices, Quotes, and Betas")
+    prices = { ticker: D(price) for ticker, price in api._price_agg().items() }
+    betas  = { ticker: D(beta) for ticker, beta in api._beta_agg().items() }
 
     print("3. Pull Option Positions (collaterals, next_expiry, and an `opened' blob)")
     data = _option_positions(prices)
@@ -174,13 +191,11 @@ def stocks(transactions, portfolio, portfolio_is_complete):
     print("6. Pull Dividends data")
     dividends = api.dividends()
 
-    print("7. Pull Fundamentals")
-    fundamentals = api.fundamentals()
-
-    print("8. Per-Ticker Operations...")
+    print("7. Per-Ticker Operations...")
     header = dict(
         ticker=str,
         price=D, # current stock price
+        pcp=D,   # previous closing price
         quantity=D,
         average_buy_price=D, # your average according to robinhood
         equity=D,
@@ -256,13 +271,12 @@ def stocks(transactions, portfolio, portfolio_is_complete):
             culq = cbu['long']['qty']
             culv = cbu['long']['value']
 
-            #print(f"8.4. [{ticker}] Fundamentals (if missing)")
-            if ticker not in fundamentals:
-                fundamentals[ticker] = api.fundamental(ticker)
-
-            #print(f"8.5. [{ticker}] Prices (if missing)")
+            #print(f"8.5. [{ticker}] Prices & Quotes (if missing)")
             if ticker not in prices:
                 prices[ticker] = api.price(ticker)
+
+            if ticker not in betas:
+                betas[ticker] = api.beta(ticker)
 
             #print("8.6. [{ticker}] Activities blob")
             _opened = '\n'.join(opened.get(ticker, []))
@@ -279,13 +293,16 @@ def stocks(transactions, portfolio, portfolio_is_complete):
 
             collateral = collaterals[ticker]
             premium = premiums[ticker]
-            fundamental = fundamentals[ticker]
             dividend = dividends[ticker]
-            next_expiry = next_expiries.get(ticker, None)
+            next_expiry = next_expiries.get(ticker, pd.NaT)
             ttl = util.datetime.delta(now, next_expiry).days if next_expiry else -1
+            fundamentals = api.fundamental(ticker)
+            quote = api.quote(ticker)
             data.append(dict(
                 ticker=ticker,
                 price=prices[ticker],
+                pcp=D(quote['previousClose']),
+                beta=D(betas[ticker]),
                 quantity=holding['quantity'],
                 average_buy_price=holding['average_buy_price'],
                 equity=holding['equity'],
@@ -309,8 +326,8 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 culv=culv,
                 premium_collected=premium,
                 dividends_collected=sum(D(div['amount']) for div in dividend),
-                pe_ratio2=D(fundamental['pe_ratio']),
-                pb_ratio=D(fundamental['pb_ratio']),
+                pe_ratio2=D(fundamentals['pe_ratio']),
+                pb_ratio=D(fundamentals['pb_ratio']),
                 collateral_call=D(collateral['call']),
                 collateral_put=D(collateral['put']),
                 ttl=ttl,
@@ -348,12 +365,12 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         # Update the main Feather DataFrame (on-disk) with the partial data we just
         # retrieved.
         print("11. Partial update and dump to feather")
-        #dfm = pd.read_parquet(feather)
-        #columns = list(dfm.columns)
-        #dfm.set_index(keys=columns, inplace=True)
-        #dfm.update(df.set_index(columns))
-        #dfm.reset_index()
-        #df.to_parquet(feather)
+        dfm = pd.read_parquet(feather)
+        columns = list(dfm.columns)
+        dfm.set_index(keys=columns, inplace=True)
+        dfm.update(df.set_index(columns))
+        dfm.reset_index(inplace=True)
+        dfm.to_parquet(feather)
 
     return df
 

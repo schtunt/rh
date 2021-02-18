@@ -12,6 +12,7 @@ import api
 import lots
 import events
 
+
 class Stock:
     #todo move this to api and make dynamic
     mappings = {
@@ -62,12 +63,8 @@ class Stock:
         return api.earnings(self.ticker)
 
     @property
-    def yesterday(self):
-        return api.yesterday(self.ticker)
-
-    @property
     def marketcap(self):
-        return api.marketcap(self.ticker)
+        return D(api.marketcap(self.ticker))
 
     @property
     def stats(self):
@@ -75,7 +72,7 @@ class Stock:
 
     @property
     def beta(self):
-        return api.beta(self.ticker)
+        return D(api.beta(self.ticker))
 
     @property
     def news(self):
@@ -181,7 +178,7 @@ class Stock:
 
     @property
     def price(self):
-        return api.price(self.ticker)
+        return D(api.price(self.ticker))
 
     @property
     def timestamp(self):
@@ -346,17 +343,6 @@ class Stock:
         realized = self.costbasis(realized=True, when=when)
         unrealized = self.costbasis(realized=False, when=when)
 
-        #util.output.ddump({
-        #    't': when,
-        #    'r': realized,
-        #    'u': unrealized,
-        #    'cb': [
-        #        costbasis[term]['value']
-        #        for costbasis in (realized, unrealized)
-        #        for term in ('short', 'long')
-        #    ],
-        #}, force=True)
-
         value, qty = Z, Z
         for costbasis in (realized, unrealized):
             for term in ('short', 'long'):
@@ -370,7 +356,21 @@ class Stock:
         if premiums:
             value += self.account.positions['premiums'][self.ticker]
 
-        return value / qty if qty > 0 else 0
+        #util.output.ddump({
+        #    't': when,
+        #    'r': realized,
+        #    'u': unrealized,
+        #    'cb': [
+        #        costbasis[term]['value']
+        #        for costbasis in (realized, unrealized)
+        #        for term in ('short', 'long')
+        #    ],
+        #    'value': value,
+        #    'qty': qty,
+        #    'esp': value / qty if qty > Z else Z
+        #}, force=True)
+
+        return value / qty if qty > Z else Z
 
     def traded(self, when=None):
         return sum(map(lambda buy: buy.quantity(when=when), self.buys))

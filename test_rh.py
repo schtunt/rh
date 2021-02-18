@@ -1,17 +1,18 @@
-import pytest
-import unittest
-import unittest.mock
-
 # Testing, no interwebz allowed
 import socket
 def suckit(*args, **kwargs):
     raise Exception("Nice try, but no Interwebz for you!")
 socket.socket = suckit
 
+import unittest
+import unittest.mock
+
 # Decorators must be mocked prior to they being imported anywhere
 import cachier
 dontcachier = lambda *args, **kwargs: lambda fn: fn
 unittest.mock.patch(target='cachier.cachier', new=dontcachier).start()
+
+import pytest
 
 # Follow-ups for mocking in Python, if things get more complicated
 # + https://alexmarandon.com/articles/python_mock_gotchas/
@@ -134,8 +135,7 @@ def key(request):
     return request.param
 
 
-def answers(index, price):
-    p = price
+def answers(index):
     return {
         key: D([
             (1, 0, 100,  100,               0,   0,    0, 0, 0, 100,    0, 0, 0),
@@ -161,12 +161,11 @@ def test_stock(iex_prices, iex_price, rh_get_latest_price, now, index, price, ke
     rh_get_latest_price.return_value = [ price ]
     now.return_value = index2date(index)
 
-    #assert account.util.datetime.now() == index2date(index)
     if index > 7: return
 
     acc = account.Account(tickers=['AAPL'])
     stock = acc.get_stock('AAPL')
     ledger = stock._ledger[index]
-    answer = answers(index, price)
+    answer = answers(index)
 
     assert ledger[key] == answer[key]

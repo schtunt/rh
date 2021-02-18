@@ -50,6 +50,12 @@ FIXTURES = {
             'year5ChangePercent': 5.255546102405064,
             'ytdChangePercent': 0.03221326570660876
         },
+        'get_quote': {
+            'AAPL': {
+                'symbol': 'AAPL',
+                'previousClose': 130.84,
+            }
+        }
     },
     'rh': {
     },

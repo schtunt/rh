@@ -11,6 +11,7 @@ from pygments.formatters import Terminal256Formatter
 from beautifultable import BeautifulTable
 
 import constants
+from constants import ZERO as Z
 
 def dprintf(fmt, *args):
     print(fmt % args)
@@ -93,7 +94,7 @@ def mktable(
 
     # 2. populate
     for i, datum in data:
-        table.rows.append(map(lambda k: datum.get(k, 'N/A'), columns))
+        table.rows.append(map(lambda k: datum.get(k, Z), columns))
 
     # 3. filter
     if filter_by is not None:

@@ -1,12 +1,16 @@
 import math, decimal
 import numpy as np
+import scipy as sp
 
 dec = lambda n: decimal.Decimal(str(n) if n is not None else 'NaN')
 rnd = lambda a, r: round(a / r) * r
 sgn = lambda n: -1 if n <= 0 else 1
 nan = decimal.Decimal('NaN')
 
-D = lambda *args: dec(0 if len(args) == 0 else args[0])
+def D(*args):
+    if len(args) == 0: return dec(0)
+    try: return dec(args[0])
+    except: raise RuntimeError("Failed to convert `%s' to a decimal" % args[0])
 
 std = lambda n: dec(np.std(n))
 mean = lambda n: dec(np.mean(n))

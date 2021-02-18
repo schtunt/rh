@@ -7,22 +7,31 @@ import pandas as pd
 import util
 from util.numbers import D
 
+
+PORTFOLIO = {}
+
+
+def __getattr__(ticker: str) -> stocks.Stock:
+    return PORTFOLIO[ticker.upper()]
+
+
+#@util.singleton
 class Account:
     def __init__(self, tickers=()):
         self._transactions = slurp.transactions()
 
         portfolio_is_complete = bool(len(tickers) == 0)
 
-        self._portfolio = {
+        PORTFOLIO.update({
             ticker: stocks.Stock(self, ticker)
             for ticker in (
                 api.symbols() if portfolio_is_complete else tickers
             )
-        }
+        })
 
         self._stocks = slurp.stocks(
             self._transactions,
-            self._portfolio,
+            PORTFOLIO,
             portfolio_is_complete=portfolio_is_complete,
         )
 
@@ -49,17 +58,16 @@ class Account:
 
         slurp.embelish(
             obj=S,
-            attributes=('ticker',),
-            column='trd0',
+            attributes=('price', 'pcp'),
+            column='change',
             chain=(
-                lambda attrs: T[T['symbol'] == attrs[0]].date,
-                lambda dates: min(dates) if len(dates) else pd.NaT,
+                lambda attrs: 100 * (attrs[0] / attrs[1] - 1),
             )
         )
         # }=-
 
     def get_stock(self, ticker):
-        return self._portfolio[ticker]
+        return PORTFOLIO[ticker]
 
     @property
     def transactions(self):
@@ -71,4 +79,4 @@ class Account:
 
     @property
     def portfolio(self):
-        return self._portfolio.items()
+        return PORTFOLIO.ITEMS()

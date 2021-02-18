@@ -1,6 +1,7 @@
 from functools import wraps
 from time import time
 from collections import defaultdict
+
 import util
 from util.numbers import D
 
@@ -22,6 +23,8 @@ def measure(func):
 def measurements():
     util.output.ddump(MEASURED)
 
+
+
 import os
 import datetime
 import pathlib
@@ -42,17 +45,6 @@ import finnhub
 import monkeylearn
 
 IEX_STOCKS = {}
-
-
-@measure
-def iex_stock(ticker):
-    global IEX_STOCKS
-    if ticker in IEX_STOCKS:
-        stock = IEX_STOCKS[ticker]
-    else:
-        stock = iex.Stock(ticker)
-        IEX_STOCKS[ticker] = stock
-    return stock
 
 
 CONNECTIONS = {}
@@ -85,14 +77,23 @@ def connect():
     rh.helper.set_output(open(os.devnull, "w"))
 
 
+@measure
+def connected(fn):
+    def connected(*args, **kwargs):
+        connect()
+        return fn(*args, **kwargs)
+
+    return connected
+
+# MonkeyLearn -={
 news_blob_hash = lambda *args, **kwargs: hashlib.sha1('|'.join(args[0][0]).encode('utf-8')).digest()
 @cachier.cachier(stale_after=datetime.timedelta(hours=4), hash_params=news_blob_hash)
 @measure
 def sentiments(blob):
     response = CONNECTIONS['ml'].classifiers.classify('cl_pi3C7JiL', blob)
     return response.body
-
-
+# }=-
+# Finnhub -={
 @cachier.cachier(stale_after=datetime.timedelta(hours=2))
 @measure
 def recommendations(ticker):
@@ -103,21 +104,13 @@ def recommendations(ticker):
 @measure
 def target(ticker):
     return CONNECTIONS['fh'].price_target(ticker)
-
-
-@measure
-def connected(fn):
-    def connected(*args, **kwargs):
-        connect()
-        return fn(*args, **kwargs)
-
-    return connected
-
-
+# }=-
+# RH -={
 @cachier.cachier(stale_after=datetime.timedelta(days=300))
 @measure
 def instrument2symbol(url):
     return rh.stocks.get_symbol_by_url(url)
+
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=1))
 @measure
@@ -160,6 +153,7 @@ def holdings():
 def instrument(url):
     return rh.stocks.get_instrument_by_url(url)
 
+
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @measure
 def dividends():
@@ -171,6 +165,12 @@ def dividends():
     return dividends
 
 
+@cachier.cachier(stale_after=datetime.timedelta(weeks=1))
+@measure
+def ticker(uri):
+    return rh.stocks.get_name_by_url(uri).upper()
+# }=-
+# RH Orders -={
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @measure
 def positions(otype, ostate, info=None):
@@ -185,7 +185,8 @@ def positions(otype, ostate, info=None):
         },
     }[otype][ostate](info)
     #rh.options.get_aggregate_positions
-
+# }=-
+# RH Positions -={
 @cachier.cachier(stale_after=datetime.timedelta(hours=2))
 @measure
 def orders(otype, ostate, info=None):
@@ -199,108 +200,129 @@ def orders(otype, ostate, info=None):
             'open': rh.orders.get_all_open_stock_orders,
         },
     }[otype][ostate](info)
-
-
-@cachier.cachier(stale_after=datetime.timedelta(weeks=1))
-@measure
-def ticker(uri):
-    return rh.stocks.get_name_by_url(uri).upper()
-
-PRICES = {}
-@measure
-def prices(tickers=None):
-    if len(PRICES) == 0:
-        missing = symbols()
-    else:
-        missing = symbols() if tickers is None else [
-            ticker for ticker in tickers if ticker not in PRICES
-        ]
-
-    for chunk in util.chunk(missing, 100):
-        PRICES.update({
-            ticker: D(price)
-            for ticker, price in iex.Stock(chunk).get_price().items()
-        })
-
-    return PRICES if tickers is None else {
-        ticker: PRICES[ticker] for ticker in tickers
-    }
-
-@measure
-def price(ticker):
-    if ticker not in PRICES:
-        _ = prices(tickers=[ticker])
-    return PRICES[ticker]
-
+# }=-
+# RH Fundamentals -={
 FUNDAMENTALS = {}
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @measure
-def fundamentals():
+def _fundamentals_agg():
     fun = {}
     for tickers in util.chunk(symbols(), 32):
         fun.update(dict(zip(tickers, rh.stocks.get_fundamentals(tickers))))
     return fun
 
-@cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @measure
-def fundamental(ticker):
+def fundamentals(ticker):
+    if len(FUNDAMENTALS) == 0:
+        _fundamentals_agg()
     if ticker not in FUNDAMENTALS:
         FUNDAMENTALS[ticker] = rh.stocks.get_fundamentals(ticker)[0]
     return FUNDAMENTALS[ticker]
+# }=-
+
+# IEX Aggregation -={
+IEX_AGGREGATOR = defaultdict(dict)
+def _iex_aggregator(fn_name, ticker=None):
+    #util.output.ddump(IEX_AGGREGATOR, force=True)
+
+    agg = IEX_AGGREGATOR[fn_name]
+    if len(agg) == 0:
+        if fn_name in ('get_market_cap', 'get_beta'):
+            # https://github.com/addisonlynch/iexfinance/issues/261
+            # https://github.com/addisonlynch/iexfinance/issues/260
+            print('Refusing to call API for %s' % fn_name)
+            pass
+        else:
+            for chunk in util.chunk(symbols(), 100):
+                fn = getattr(iex.Stock(chunk), fn_name)
+                agg.update({
+                    ticker: datum
+                    for ticker, datum in fn().items()
+                })
+
+    if ticker is not None:
+        if ticker not in agg:
+            fn = getattr(iex.Stock(ticker), fn_name)
+            datum = fn()
+            if datum: agg[ticker] = fn()
+        else:
+            datum = agg[ticker]
+
+        return datum
+
+    return {ticker: datum for ticker, datum in agg.items()}
+
+
+@cachier.cachier(stale_after=datetime.timedelta(hours=3))
+@measure
+def _price_agg(ticker=None): return _iex_aggregator('get_price', ticker)
+price = lambda ticker: _price_agg(ticker)
+
+
+@cachier.cachier(stale_after=datetime.timedelta(days=14))
+@measure
+def _beta_agg(ticker=None): return _iex_aggregator('get_beta', ticker)
+beta = lambda ticker: _beta_agg(ticker)
+
+
+@cachier.cachier(stale_after=datetime.timedelta(hours=12))
+@measure
+def _quote_agg(ticker=None): return _iex_aggregator('get_quote', ticker)
+quote = lambda ticker: _quote_agg(ticker)
+
+
+@cachier.cachier(stale_after=datetime.timedelta(hours=3))
+@measure
+def _stats_agg(ticker=None): return _iex_aggregator('get_key_stats', ticker)
+stats = lambda ticker: _stats_agg(ticker)
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=2))
 @measure
-def events(ticker):
-    return rh.stocks.get_events(ticker)
+def _events_agg(ticker=None): return _iex_aggregator('get_events', ticker)
+events = lambda ticker: _events_agg(ticker)
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=3))
 @measure
-def earnings(ticker):
-    return rh.stocks.get_earnings(ticker)
+def _earnings_agg(ticker=None): return _iex_aggregator('get_earnings', ticker)
+earnings = lambda ticker: _earnings_agg(ticker)
 
 
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @measure
-def splits(ticker):
-    stock = iex_stock(ticker)
-    return stock.get_splits()
+def _splits_agg(ticker=None): return _iex_aggregator('get_splits', ticker)
+splits = lambda ticker: _splits_agg(ticker)
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=4))
 @measure
-def yesterday(ticker):
-    stock = iex_stock(ticker)
-    return stock.get_previous_day_prices()
+def _previous_day_prices_agg(ticker=None): return _iex_aggregator('get_previous_day_prices', ticker)
+previous_day_prices = lambda ticker: _previous_day_prices_agg(ticker)
 
 
-@cachier.cachier(stale_after=datetime.timedelta(days=1))
+@cachier.cachier(stale_after=datetime.timedelta(days=7))
 @measure
-def marketcap(ticker):
-    stock = iex_stock(ticker)
-    return stock.get_market_cap()
+def _market_cap_agg(ticker=None): return _iex_aggregator('get_market_cap', ticker)
+market_cap = lambda ticker: _market_cap_agg(ticker)
+marketcap = market_cap
 
 
-@cachier.cachier(stale_after=datetime.timedelta(hours=3))
+# }=-
+# IEX Other -={
 @measure
-def stats(ticker):
-    stock = iex_stock(ticker)
-    return stock.get_key_stats()
+def iex_stock(ticker):
+    global IEX_STOCKS
+    if ticker in IEX_STOCKS:
+        stock = IEX_STOCKS[ticker]
+    else:
+        stock = iex.Stock(ticker)
+        IEX_STOCKS[ticker] = stock
+    return stock
 
 
-@cachier.cachier(stale_after=datetime.timedelta(hours=3))
-@measure
-def beta(ticker):
-    stock = iex_stock(ticker)
-    return stock.get_beta()
-
-
-@cachier.cachier(stale_after=datetime.timedelta(hours=1))
-@measure
-def quote(ticker):
-    stock = iex_stock(ticker)
-    return stock.get_quote()
+def __getattr__(ticker: str) -> iex.Stock:
+    return iex_stock(ticker.upper())
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=1))
@@ -310,3 +332,4 @@ def news(ticker, source):
         'rh': lambda: rh.stocks.get_news(ticker),
         'iex': lambda: iex_stock(ticker).get_news()
     }[source]()
+# }=-
