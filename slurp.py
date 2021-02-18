@@ -12,6 +12,7 @@ import events
 from progress.bar import ShadyBar
 
 from util.numbers import dec as D
+from util.color import strip as S
 from constants import ZERO as Z
 
 
@@ -150,27 +151,27 @@ def stocks(transactions, portfolio, portfolio_is_complete):
     print("1. Pull holdings")
     holdings = api.holdings()
 
-    print("2. Pull Option Positions (collaterals, next_expiry, and an `opened' blob)")
-    data = _option_positions()
+    print("2. Pull Prices")
+    prices = api.prices()
+
+    print("3. Pull Option Positions (collaterals, next_expiry, and an `opened' blob)")
+    data = _option_positions(prices)
     collaterals = data['collaterals']
     next_expiries = data['next_expiry']
     opened = data['opened']
     del data
 
-    print("3. Pull Options Orders (premiums and a `closed' blob)")
+    print("4. Pull Options Orders (premiums and a `closed' blob)")
     data = _option_orders()
     premiums = data['premiums']
     closed = data['closed']
     del data
 
-    print("4. Pull Stock Orders (blob)")
+    print("5. Pull Stock Orders (blob)")
     stock_orders = _stock_orders()
 
-    print("5. Pull Dividends data")
+    print("6. Pull Dividends data")
     dividends = api.dividends()
-
-    print("6. Pull Prices")
-    prices = api.prices()
 
     print("7. Pull Fundamentals")
     fundamentals = api.fundamentals()
@@ -224,6 +225,8 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         m1cp=D,
         d30cp=D,
         d5cp=D,
+
+        activities=str,
     )
 
     data = []
@@ -260,23 +263,17 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 prices[ticker] = api.price(ticker)
 
             #print("8.6. [{ticker}] Activities blob")
-            #_opened = '\n'.join(opened.get(ticker, []))
-            #_closed = '\n'.join(closed.get(ticker, []))
-            #if _opened and _closed:
-            #    activities = ('\n%s\n' % ('─' * 32)).join((_opened, _closed))
-            #elif opened:
-            #    activities = _opened
-            #elif closed:
-            #    activities = _closed
-            #else:
-            #    collateral = D(collaterals[ticker]['call'])
-            #    optionable = D(holding['quantity']) - collateral
-            #    activities = (
-            #        'N/A' if optionable < 100 else '%sx100 available' % (
-            #            util.color.qty0(optionable // 100)
-            #        )
-            #    )
-            activities = 'N/A'
+            _opened = '\n'.join(opened.get(ticker, []))
+            _closed = '\n'.join(closed.get(ticker, []))
+            _collateral = D(collaterals[ticker]['call'])
+            _optionable = (D(holding['quantity']) - _collateral) // 100
+            activities_data = []
+            if _opened: activities_data.append(_opened)
+            if _closed: activities_data.append(_closed)
+            if _optionable > 0: activities_data.append(
+                '%sx100 available' % (util.color.qty0(_optionable))
+            )
+            activities = ('\n%s\n' % ('─' * 32)).join(activities_data)
 
             collateral = collaterals[ticker]
             premium = premiums[ticker]
@@ -314,7 +311,6 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 pb_ratio=D(fundamental['pb_ratio']),
                 collateral_call=D(collateral['call']),
                 collateral_put=D(collateral['put']),
-                next_expiry=next_expiry,
                 ttl=ttl,
                 marketcap=stock.marketcap,
                 d50ma=D(stock.stats['day50MovingAvg']),
@@ -327,6 +323,8 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 m1cp=D(stock.stats['month1ChangePercent']),
                 d30cp=D(stock.stats['day30ChangePercent']),
                 d5cp=D(stock.stats['day5ChangePercent']),
+                activities=activities,
+                next_expiry=next_expiry,
             ))
 
             bar.next()
@@ -347,23 +345,24 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         # Update the main Feather DataFrame (on-disk) with the partial data we just
         # retrieved.
         print("11. Partial update and dump to feather")
-        dfm = pd.read_parquet(feather)
-        columns = list(dfm.columns)
-        dfm.set_index(keys=columns, inplace=True)
-        dfm.update(df.set_index(columns))
-        dfm.reset_index()
-        df.to_parquet(feather)
+        #dfm = pd.read_parquet(feather)
+        #columns = list(dfm.columns)
+        #dfm.set_index(keys=columns, inplace=True)
+        #dfm.update(df.set_index(columns))
+        #dfm.reset_index()
+        #df.to_parquet(feather)
 
     return df
 
 
-def _option_positions():
+def _option_positions(prices):
     next_expiry = {}
     data = api.positions('options', 'all')
     collaterals = defaultdict(lambda: {'put': Z, 'call': Z})
     opened = defaultdict(list)
     for option in [o for o in data if D(o['quantity']) != Z]:
         ticker = option['chain_symbol']
+        price = prices[ticker]
 
         uri = option['option']
         instrument = api.instrument(uri)
@@ -373,14 +372,19 @@ def _option_positions():
             premium -= D(option['quantity']) * D(option['average_price'])
 
         itype = instrument['type']
-        opened[ticker].append("%s %s %s x%s P=%s K=%s X=%s" % (
+        otype = option['type']
+
+        s_k_ratio = price / D(instrument['strike_price'])
+
+        opened[ticker].append("%s %s %s x%s P=%s K=%s X=%s %s" % (
             instrument['state'],
-            option['type'],
-            itype,
+            util.color.otype(otype),
+            util.color.itype(itype),
             util.color.qty(option['quantity'], Z),
             util.color.mulla(premium),
             util.color.mulla(instrument['strike_price']),
             instrument['expiration_date'],
+            util.color.wtm(s_k_ratio, otype, itype)
         ))
         expiry = util.datetime.parse(instrument['expiration_date'])
         if next_expiry.get(ticker) is None:

@@ -16,7 +16,7 @@ import account
 
 import util
 from util.numbers import dec as D
-from util.output import ansistrip as S
+from util.color import strip as S
 DS = lambda s: D(S(s))
 
 @click.group()
@@ -93,7 +93,7 @@ VIEWS = {
         ],
     },
     'active': {
-        'sort_by': 'ttl',
+        'sort_by': 'next_expiry',
         'filter_by': 'next_expiry',
         'columns': [
             'ticker', 'percentage',
@@ -102,7 +102,7 @@ VIEWS = {
             'equity_change', 'percent_change',
             'premium_collected', 'dividends_collected',
             'activities',
-            'next_expiry', 'ttl'
+            'next_expiry',
         ],
     },
     'tax': {
@@ -157,9 +157,8 @@ FORMATERS = {
     'crlv': util.color.mulla,
     'analyst': util.color.qty,
     'news': util.color.qty,
-    'next_expiry': util.datetime.short,
-    'ttl': util.color.qty0,
-    'trd0': util.datetime.days,
+    'next_expiry': util.datetime.ttl,
+    'trd0': util.datetime.age,
 }
 
 
@@ -209,19 +208,14 @@ def history(ctx, tickers):
 
 
 acc = None
-def interact():
+def repl():
     print("Initializing APIs...")
-    global acc
-    acc = account.Account(tickers)
 
-    #print(acc.rh.authentication.getpass.getuser())
+    global acc
+    acc = account.Account()
 
     print("Injecting Stock objects for all stocks in your portfolio...")
     module = sys.modules[__name__]
-    #for ticker in api.symbols():
-        #key = ticker.lower()
-        #setattr(module, key, acc.portfolio[ticker])
-        #setattr(module, '_%s' % key, iex.Stock(ticker))
 
     print("Done! Available ticker objects:")
     print(" + rh.acc           (Local Robinhood Account object)")
@@ -237,15 +231,15 @@ def interact():
     print(" + relmod()         (reload wthout having to exit the repl)")
 
 
-def preinitialize(repl=False):
+def preinitialize():
     api.connect()
     locale.setlocale(locale.LC_ALL, '')
     if not pathlib.posixpath.exists(constants.CACHE_DIR):
         os.mkdir(constants.CACHE_DIR)
 
-
 if __name__ == '__main__':
-    preinitialize(repl=True)
+    preinitialize()
     cli()
-elif not hasattr(__main__, '__file__'):
-    interact()
+elif hasattr(__main__, '__file__'):
+    preinitialize()
+    repl()

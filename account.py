@@ -20,10 +20,6 @@ class Account:
             )
         }
 
-        util.output.ddump({
-            'complete?'       : portfolio_is_complete,
-        }, force=True)
-
         self._stocks = slurp.stocks(
             self._transactions,
             self._portfolio,
@@ -33,6 +29,7 @@ class Account:
         S = self._stocks
         T = self._transactions
 
+        # Embelishments -={
         slurp.embelish(
             obj=S,
             attributes=('d200ma', 'd50ma', 'price',),
@@ -59,6 +56,7 @@ class Account:
                 lambda dates: min(dates) if len(dates) else pd.NaT,
             )
         )
+        # }=-
 
     def get_stock(self, ticker):
         return self._portfolio[ticker]

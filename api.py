@@ -20,7 +20,7 @@ def measure(func):
     return timed
 
 def measurements():
-    util.output.ddump(MEASURED, force=True)
+    util.output.ddump(MEASURED)
 
 import os
 import datetime

@@ -1,4 +1,3 @@
-import re
 import time
 import json
 import decimal, datetime
@@ -124,8 +123,3 @@ def mktable(
                 raise
 
     return table
-
-
-RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-def ansistrip(s):
-    return RE_ANSI.sub('', s)

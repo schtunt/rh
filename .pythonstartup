@@ -1,8 +1,13 @@
+import scipy as sp
 import numpy as np
 import pandas as pd
 
 import rh
 import api
+import util
+import util.debug
+import events
+import stocks
 import account
 
 import importlib
@@ -10,5 +15,9 @@ def relmod():
     importlib.reload(rh)
     importlib.reload(api)
     importlib.reload(account)
+    importlib.reload(stocks)
+    importlib.reload(events)
+    importlib.reload(util)
+    importlib.reload(util.debug)
 
-rh.interact()
+rh.repl()
