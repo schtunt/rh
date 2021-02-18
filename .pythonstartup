@@ -1,6 +1,11 @@
 import scipy as sp
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import statistics
+import math
+
+import importlib
 
 import rh
 import api
@@ -9,8 +14,13 @@ import util.debug
 import events
 import stocks
 import account
+import constants
 
-import importlib
+from constants import ZERO as Z
+from util.color import strip as S
+from util.numbers import D
+DS = lambda s: D(S(s))
+
 def relmod():
     importlib.reload(rh)
     importlib.reload(api)
@@ -19,5 +29,7 @@ def relmod():
     importlib.reload(events)
     importlib.reload(util)
     importlib.reload(util.debug)
+    importlib.reload(util.color)
+    importlib.reload(util.output)
 
 rh.repl()

@@ -24,7 +24,7 @@ import rh
 import api
 import slurp
 import account
-from util.numbers import dec as D
+from util.numbers import D
 
 import tests.fixtures
 

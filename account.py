@@ -5,7 +5,7 @@ import slurp
 import pandas as pd
 
 import util
-from util.numbers import dec as D
+from util.numbers import D
 
 class Account:
     def __init__(self, tickers=()):

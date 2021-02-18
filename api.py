@@ -2,7 +2,7 @@ from functools import wraps
 from time import time
 from collections import defaultdict
 import util
-from util.numbers import dec as D
+from util.numbers import D
 
 #import gc
 #gc.disable()

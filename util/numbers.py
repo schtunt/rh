@@ -6,6 +6,8 @@ rnd = lambda a, r: round(a / r) * r
 sgn = lambda n: -1 if n <= 0 else 1
 nan = decimal.Decimal('NaN')
 
+D = lambda *args: dec(0 if len(args) == 0 else args[0])
+
 std = lambda n: dec(np.std(n))
 mean = lambda n: dec(np.mean(n))
 ident = lambda n: n

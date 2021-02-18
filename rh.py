@@ -15,7 +15,7 @@ import api
 import account
 
 import util
-from util.numbers import dec as D
+from util.numbers import D
 from util.color import strip as S
 DS = lambda s: D(S(s))
 
@@ -93,7 +93,7 @@ VIEWS = {
         ],
     },
     'active': {
-        'sort_by': 'next_expiry',
+        'sort_by': 'urgency',
         'filter_by': 'next_expiry',
         'columns': [
             'ticker', 'percentage',
@@ -103,6 +103,7 @@ VIEWS = {
             'premium_collected', 'dividends_collected',
             'activities',
             'next_expiry',
+            'urgency',
         ],
     },
     'tax': {
@@ -158,6 +159,7 @@ FORMATERS = {
     'analyst': util.color.qty,
     'news': util.color.qty,
     'next_expiry': util.datetime.ttl,
+    'urgency': util.color.mpctr,
     'trd0': util.datetime.age,
 }
 

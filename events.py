@@ -1,5 +1,5 @@
 import util
-from util.numbers import dec as D
+from util.numbers import D
 
 from constants import ZERO as Z
 

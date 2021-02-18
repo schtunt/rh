@@ -11,7 +11,7 @@ import util
 import events
 from progress.bar import ShadyBar
 
-from util.numbers import dec as D
+from util.numbers import D
 from util.color import strip as S
 from constants import ZERO as Z
 
@@ -157,8 +157,9 @@ def stocks(transactions, portfolio, portfolio_is_complete):
     print("3. Pull Option Positions (collaterals, next_expiry, and an `opened' blob)")
     data = _option_positions(prices)
     collaterals = data['collaterals']
-    next_expiries = data['next_expiry']
+    next_expiries = data['next_expiries']
     opened = data['opened']
+    urgencies = data['urgencies']
     del data
 
     print("4. Pull Options Orders (premiums and a `closed' blob)")
@@ -226,6 +227,7 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         d30cp=D,
         d5cp=D,
 
+        urgency=D,
         activities=str,
     )
 
@@ -323,6 +325,7 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 m1cp=D(stock.stats['month1ChangePercent']),
                 d30cp=D(stock.stats['day30ChangePercent']),
                 d5cp=D(stock.stats['day5ChangePercent']),
+                urgency=urgencies[ticker],
                 activities=activities,
                 next_expiry=next_expiry,
             ))
@@ -356,10 +359,11 @@ def stocks(transactions, portfolio, portfolio_is_complete):
 
 
 def _option_positions(prices):
-    next_expiry = {}
+    next_expiries = {}
     data = api.positions('options', 'all')
     collaterals = defaultdict(lambda: {'put': Z, 'call': Z})
     opened = defaultdict(list)
+    urgencies = defaultdict(D)
     for option in [o for o in data if D(o['quantity']) != Z]:
         ticker = option['chain_symbol']
         price = prices[ticker]
@@ -375,6 +379,10 @@ def _option_positions(prices):
         otype = option['type']
 
         s_k_ratio = price / D(instrument['strike_price'])
+        urgencies[ticker] = max((
+            urgencies[ticker],
+            util.color.wtm_urgency(s_k_ratio, otype, itype)
+        ))
 
         opened[ticker].append("%s %s %s x%s P=%s K=%s X=%s %s" % (
             instrument['state'],
@@ -387,10 +395,10 @@ def _option_positions(prices):
             util.color.wtm(s_k_ratio, otype, itype)
         ))
         expiry = util.datetime.parse(instrument['expiration_date'])
-        if next_expiry.get(ticker) is None:
-            next_expiry[ticker] = expiry
+        if next_expiries.get(ticker) is None:
+            next_expiries[ticker] = expiry
         else:
-            next_expiry[ticker] = min(next_expiry[ticker], expiry)
+            next_expiries[ticker] = min(next_expiries[ticker], expiry)
 
         collaterals[ticker][itype] += 100 * D(dict(
             put=instrument['strike_price'],
@@ -399,7 +407,8 @@ def _option_positions(prices):
 
     return dict(
         collaterals=collaterals,
-        next_expiry=next_expiry,
+        urgencies=urgencies,
+        next_expiries=next_expiries,
         opened=opened,
     )
 
