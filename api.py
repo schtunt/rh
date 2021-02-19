@@ -2,6 +2,8 @@ from functools import wraps
 from time import time
 from collections import defaultdict
 
+from secrets import SECRETS
+
 import util
 from util.numbers import D
 
@@ -76,27 +78,36 @@ CONNECTIONS = {}
 def connect():
     if len(CONNECTIONS) > 0: return
 
+    secrets = defaultdict(lambda: None, SECRETS)
+    username, password = (
+        secrets['robinhood']['username'],
+        secrets['robinhood']['password'],
+    )
+    CONNECTIONS['rh'] = rh.login(username, password)
+    rh.helper.set_output(open(os.devnull, "w"))
+
+    iex_api_key = secrets['iex_api_key']
+    os.environ['IEX_TOKEN'] = iex_api_key
+    os.environ['IEX_OUTPUT_FORMAT'] = 'json'
+
+    finnhub_api_key = secrets['finnhub_api_key']
+    CONNECTIONS['fh'] = finnhub.Client(
+        api_key=finnhub_api_key
+    ) if finnhub_api_key else None
+
+    monkeylearn_api_key = secrets['monkeylearn_api_key']
+    CONNECTIONS['ml'] = monkeylearn.MonkeyLearn(
+        monkeylearn_api_key
+    ) if monkeylearn_api_key else None
+
     CONNECTIONS['yec'] = yec.YahooEarningsCalendar()
     # use datetime.fromtimestamp() for ^^'s results
 
-    with open(os.path.join(pathlib.Path.home(), ".rhrc")) as fh:
-        (
-            username, password,
-            polygon_api_key,
-            iex_api_key,
-            finnhub_api_key,
-            monkeylearn_api,
-            alpha_vantage_api,
-        ) = [token.strip() for token in fh.readline().split(',')]
+    alpha_vantage_api_key = secrets['alpha_vantage_api_key']
+    #ts = TimeSeries(key='YOUR_API_KEY', output_format='pandas')
+    #data, meta_data = ts.get_intraday(symbol='MSFT',interval='1min', outputsize='full')
 
-        CONNECTIONS['rh'] = rh.login(username, password)
-        CONNECTIONS['fh'] = finnhub.Client(api_key=finnhub_api_key)
-        CONNECTIONS['ml'] = monkeylearn.MonkeyLearn(monkeylearn_api)
-
-        os.environ['IEX_TOKEN'] = iex_api_key
-        os.environ['IEX_OUTPUT_FORMAT'] = 'json'
-
-    rh.helper.set_output(open(os.devnull, "w"))
+    polygon_api_key = secrets['polygon_api_key']
 
 
 @measure
