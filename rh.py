@@ -11,6 +11,7 @@ from constants import ZERO as Z
 
 import api
 import account
+import fields
 
 import util
 from util.numbers import D
@@ -113,7 +114,6 @@ FORMATERS = {
     'change': util.color.pct,                     # Change since PCP
     'esp': util.color.mulla,                      # Effective Share Price
     'quantity': util.color.qty0,
-    'marketcap': util.color.mulla,
     'average_buy_price': util.color.mulla,
     'equity': util.color.mulla,
     'percent_change': util.color.pct,
@@ -147,6 +147,7 @@ FORMATERS = {
     'urgency': util.color.mpctr,
     'trd0': util.datetime.age,
 }
+FORMATERS.update(fields.formaters())
 
 
 @cli.command(help='Views')

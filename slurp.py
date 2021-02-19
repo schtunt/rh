@@ -14,7 +14,7 @@ from progress.bar import ShadyBar
 from util.numbers import D
 from util.color import strip as S
 from constants import ZERO as Z
-
+from fields import FIELDS as F
 
 FEATHERS = {
     'transactions': '/tmp/transactions.feather',
@@ -228,7 +228,6 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         collateral_put=D,
         next_expiry=datetime.datetime,
         ttl=D,
-        marketcap=D,
 
         d50ma=D,
         d200ma=D,
@@ -245,6 +244,7 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         urgency=D,
         activities=str,
     )
+    header.update({field: cfg['typ'] for field, cfg in C.items()})
 
     data = []
     with ShadyBar('Processing', max=len(portfolio)) as bar:
@@ -296,9 +296,9 @@ def stocks(transactions, portfolio, portfolio_is_complete):
             dividend = dividends[ticker]
             next_expiry = next_expiries.get(ticker, pd.NaT)
             ttl = util.datetime.delta(now, next_expiry).days if next_expiry else -1
-            fundamentals = api.fundamental(ticker)
+            fundamentals = api.fundamentals(ticker)
             quote = api.quote(ticker)
-            data.append(dict(
+            row = dict(
                 ticker=ticker,
                 price=prices[ticker],
                 pcp=D(quote['previousClose']),
@@ -331,7 +331,6 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 collateral_call=D(collateral['call']),
                 collateral_put=D(collateral['put']),
                 ttl=ttl,
-                marketcap=stock.marketcap,
                 d50ma=D(stock.stats['day50MovingAvg']),
                 d200ma=D(stock.stats['day200MovingAvg']),
                 y5cp=D(stock.stats['year5ChangePercent']),
@@ -345,7 +344,9 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 urgency=urgencies[ticker],
                 activities=activities,
                 next_expiry=next_expiry,
-            ))
+            )
+            row.update(fields.rows(ticker))
+            data.append(row)
 
             bar.next()
 

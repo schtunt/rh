@@ -322,6 +322,10 @@ def iex_stock(ticker):
 
 
 def __getattr__(ticker: str) -> iex.Stock:
+    ticker = ticker.upper()
+    if ticker not in symbols():
+        raise RuntimeError("The ticker `%s' is not in this portfolio" % ticker)
+
     return iex_stock(ticker.upper())
 
 
