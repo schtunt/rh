@@ -70,18 +70,16 @@ def prtable(table):
     table.columns.header = columns
 
 def mktable(
-    VIEWS,
     data,
-    view,
+    columns,
     formats,
     maxwidth=320,
     tickers=(),
     filter_by=None,
-    sort_by=None,
+    sort_by='ticker',
     reverse=False,
     limit=None
 ):
-    columns = VIEWS[view]['columns']
 
     # 0. create
     table = BeautifulTable(maxwidth=maxwidth)
@@ -103,9 +101,6 @@ def mktable(
         table = table.rows.filter(lambda row: row['ticker'] in tickers)
 
     # 4. sort
-    if not sort_by:
-        sort_by = VIEWS[view].get('sort_by', 'ticker')
-
     table.rows.sort(key=sort_by, reverse=reverse)
 
     # 5. limit

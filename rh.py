@@ -35,19 +35,12 @@ def cli(ctx, debug, clear_cache):
 
 CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 
-FILTERS = {
-    'active': lambda d: len(d['activities']),
-    'optionable': lambda d: DS(d['quantity']) - DS(d['CC.Coll']) > 100,
-    'next_expiry': lambda d: d['next_expiry'] is not pd.NaT,
-    'soon_expiring': lambda d: d['next_expiry'] is not pd.NaT and util.datetime.ttl(d['next_expiry']) < 7,
-    'movers': lambda d: abs(d['change']) >= 5,
-}
-
-VIEWS = {
-    'movers': {
-        'sort_by': 'change',
-        'filter_by': 'movers',
-        'columns': [
+VIEWS = [
+    {
+        'configurations': [
+            { 'title': 'movers', 'sort_by': 'change', 'filter_by': 'movers' },
+        ],
+        'fields': [
             'ticker',
             'marketcap',
             'ma', 'd200ma', 'd50ma', 'pcp', 'price',
@@ -62,10 +55,11 @@ VIEWS = {
             'trd0',
         ],
     },
-    'active': {
-        'sort_by': 'urgency',
-        'filter_by': 'next_expiry',
-        'columns': [
+    {
+        'configurations': [
+            { 'title': 'active', 'sort_by': 'urgency', 'filter_by': 'next_expiry' },
+        ],
+        'fields': [
             'ticker', 'percentage',
             'quantity', 'price', 'esp',
             'equity',
@@ -76,10 +70,12 @@ VIEWS = {
             'urgency',
         ],
     },
-    'expiring': {
-        'sort_by': 'urgency',
-        'filter_by': 'soon_expiring',
-        'columns': [
+    {
+        'configurations': [
+            { 'title': 'expiring', 'sort_by': 'urgency', 'filter_by': 'soon_expiring' },
+            { 'title': 'urgent', 'sort_by': 'next_expiry', 'filter_by': 'urgent' },
+        ],
+        'fields': [
             'ticker', 'percentage',
             'quantity', 'price', 'esp',
             'equity',
@@ -90,9 +86,11 @@ VIEWS = {
             'urgency',
         ],
     },
-    'tax': {
-        'sort_by': 'ticker',
-        'columns': [
+    {
+        'configurations': [
+            { 'title': 'tax', 'sort_by': 'ticker' }
+        ],
+        'fields': [
             'ticker',
             'equity',
             'price', 'quantity',
@@ -101,7 +99,7 @@ VIEWS = {
             'premium_collected', 'dividends_collected',
         ],
     },
-}
+]
 
 FORMATERS = {
     'bucket': lambda b: util.color.colored('$%dk' % b, 'blue'),
@@ -149,10 +147,28 @@ FORMATERS = {
 }
 FORMATERS.update(fields.formaters())
 
+FILTERS = {
+    None: lambda d: d,
+    'active': lambda d: len(d['activities']),
+    'next_expiry': lambda d: d['next_expiry'] is not pd.NaT,
+    'soon_expiring': lambda d: d['next_expiry'] is not pd.NaT and util.datetime.ttl(d['next_expiry']) < 7,
+    'movers': lambda d: abs(d['change']) >= 5,
+    'urgent': lambda d: d['urgency'] > 0.8,
+}
+
+_VIEWS = {}
+for cfg in VIEWS:
+    fields = cfg['fields']
+    for view in cfg['configurations']:
+        _VIEWS[view['title']] = dict(
+            sort_by=view.get('sort_by', 'ticker'),
+            filter_by=FILTERS[view.get('filter_by', None)],
+            fields=fields,
+        )
 
 @cli.command(help='Views')
 @click.option('-t', '--tickers', multiple=True, default=None)
-@click.option('-v', '--view', default='expiring', type=click.Choice(VIEWS.keys()))
+@click.option('-v', '--view', default='expiring', type=click.Choice(_VIEWS.keys()))
 @click.option('-s', '--sort-by', default=False, type=str)
 @click.option('-r', '--reverse', default=False, is_flag=True, type=bool)
 @click.option('-l', '--limit', default=-1, type=int)
@@ -162,14 +178,13 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     tickers = [t.upper() for t in tickers]
     acc = account.Account(tickers)
 
-    filter_by = VIEWS[view].get('filter_by', None)
-    if filter_by is not None:
-        filter_by = FILTERS[filter_by]
+    columns = _VIEWS[view]['fields']
+    sort_by = _VIEWS[view]['sort_by']
+    filter_by = _VIEWS[view]['filter_by']
 
     table = util.output.mktable(
-        VIEWS,
         acc.stocks,
-        view,
+        columns,
         FORMATERS,
         tickers=tickers,
         filter_by=filter_by,
