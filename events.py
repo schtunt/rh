@@ -22,6 +22,9 @@ class Event:
     def unsettled(self):
         return 0
 
+    def date(self):
+        return util.datetime.short(self.timestamp)
+
     def connect(self, lc):
         self.connections.append(lc)
 
@@ -84,6 +87,7 @@ class TransactionEvent(Event):
         quantity = self._quantity
         if when is None: return quantity
 
+        q0 = quantity
         for splitter in self.stock.splits:
             if self.timestamp <= splitter.timestamp <= when:
                 quantity = splitter.forward(quantity)

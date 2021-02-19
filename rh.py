@@ -3,6 +3,7 @@
 import os, sys, locale
 import pathlib
 import click
+import colored_traceback.auto
 
 import pandas as pd
 

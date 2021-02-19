@@ -44,6 +44,28 @@ import polygon
 import finnhub
 import monkeylearn
 
+
+
+TICKER_CHAIN = defaultdict(tuple)
+TICKER_CHAIN.update({
+    'STLA': ( 'FCAU', ),
+    'SIRI': ( 'P', ),
+})
+
+TICKER_BLACKLIST = set((
+    'AABAZZ',
+))
+TICKER_BLACKLIST |= set(tocker for chain in TICKER_CHAIN.values() for tocker in chain)
+
+is_black = lambda ticker: bool(ticker in TICKER_BLACKLIST)
+tockers4ticker = lambda ticker: set((ticker,) + TICKER_CHAIN[ticker])
+def tocker2ticker(tocker):
+    for ticker, tockers in TICKER_CHAIN.items():
+        if tocker in tockers:
+            return ticker
+    return tocker
+
+
 IEX_STOCKS = {}
 
 
@@ -126,7 +148,7 @@ def symbols():
             ) | set(
                 holdings().keys()
             )
-        ) - set(('AABAZZ',))
+        ) - TICKER_BLACKLIST
     )
 
 
@@ -201,7 +223,7 @@ def orders(otype, ostate, info=None):
         },
     }[otype][ostate](info)
 # }=-
-# RH Fundamentals -={
+# RH Ticker Endpoints -={
 FUNDAMENTALS = {}
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @measure
@@ -220,6 +242,13 @@ def fundamentals(ticker):
     return FUNDAMENTALS[ticker]
 # }=-
 
+@cachier.cachier(stale_after=datetime.timedelta(days=14))
+@measure
+def events(ticker):
+    return rh.stocks.get_events(ticker)
+
+
+
 # IEX Aggregation -={
 IEX_AGGREGATOR = defaultdict(dict)
 def _iex_aggregator(fn_name, ticker=None):
@@ -235,16 +264,29 @@ def _iex_aggregator(fn_name, ticker=None):
         else:
             for chunk in util.chunk(symbols(), 100):
                 fn = getattr(iex.Stock(chunk), fn_name)
-                agg.update({
-                    ticker: datum
-                    for ticker, datum in fn().items()
-                })
+
+                retrieved = fn()
+                if type(retrieved) is list:
+                    data = defaultdict(list)
+                    for datum in retrieved:
+                        data[datum['symbol']].append(datum)
+                elif type(retrieved) is dict:
+                    data = {ticker: datum for ticker, datum in retrieved.items()}
+                else:
+                    raise
+
+                agg.update(data)
 
     if ticker is not None:
         if ticker not in agg:
             fn = getattr(iex.Stock(ticker), fn_name)
-            datum = fn()
-            if datum: agg[ticker] = fn()
+            try:
+                datum = fn()
+                if datum:
+                    agg[ticker] = fn()
+            except:
+                print("Error handling ticker `%s'" % ticker)
+                raise
         else:
             datum = agg[ticker]
 
@@ -277,12 +319,6 @@ def _stats_agg(ticker=None): return _iex_aggregator('get_key_stats', ticker)
 stats = lambda ticker: _stats_agg(ticker)
 
 
-@cachier.cachier(stale_after=datetime.timedelta(hours=2))
-@measure
-def _events_agg(ticker=None): return _iex_aggregator('get_events', ticker)
-events = lambda ticker: _events_agg(ticker)
-
-
 @cachier.cachier(stale_after=datetime.timedelta(days=3))
 @measure
 def _earnings_agg(ticker=None): return _iex_aggregator('get_earnings', ticker)
@@ -308,6 +344,24 @@ market_cap = lambda ticker: _market_cap_agg(ticker)
 marketcap = market_cap
 
 
+@cachier.cachier(stale_after=datetime.timedelta(days=28))
+@measure
+def _sector_agg(ticker=None): return _iex_aggregator('get_sector', ticker)
+sector = lambda ticker: _sector_agg(ticker)
+
+
+@cachier.cachier(stale_after=datetime.timedelta(days=1))
+@measure
+def _shares_outstanding_agg(ticker=None): return _iex_aggregator('get_shares_outstanding', ticker)
+shares_outstanding = lambda ticker: _shares_outstanding_agg(ticker)
+
+
+@cachier.cachier(stale_after=datetime.timedelta(days=1))
+@measure
+def _insider_transactions_agg(ticker=None): return _iex_aggregator('get_insider_transactions', ticker)
+insider_transactions = lambda ticker: _insider_transactions_agg(ticker)
+
+
 # }=-
 # IEX Other -={
 @measure
@@ -322,9 +376,9 @@ def iex_stock(ticker):
 
 
 def __getattr__(ticker: str) -> iex.Stock:
-    ticker = ticker.upper()
-    if ticker not in symbols():
-        raise RuntimeError("The ticker `%s' is not in this portfolio" % ticker)
+    _ticker = ticker.upper()
+    if _ticker not in symbols():
+        raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
 
     return iex_stock(ticker.upper())
 

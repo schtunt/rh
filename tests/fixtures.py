@@ -3,6 +3,7 @@ rh.constants.CACHE_DIR='/tmp/'
 
 FIXTURES = {
     'iex': {
+        'get_beta': '1.00000',
         'get_splits': [{
             'date': 1598832000000,
             'declaredDate': None,
@@ -58,6 +59,7 @@ FIXTURES = {
         }
     },
     'rh': {
+        'get_events': [],
     },
     'rh.account': {
         'build_holdings': {

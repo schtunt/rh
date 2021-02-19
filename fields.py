@@ -24,5 +24,6 @@ FIELDS = {
     )
 }
 
-formaters = lambda: {header: field.pushcast for header, field in FIELDS.items()}
 row = lambda ticker: {header: field.getter(ticker) for header, field in FIELDS.items()}
+types = lambda: {header: field.pullcast for header, field in FIELDS.items()}
+formaters = lambda: {header: field.pushcast for header, field in FIELDS.items()}

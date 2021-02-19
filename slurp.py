@@ -9,12 +9,12 @@ import api
 import constants
 import util
 import events
+import fields
 from progress.bar import ShadyBar
 
 from util.numbers import D
 from util.color import strip as S
 from constants import ZERO as Z
-from fields import FIELDS as F
 
 FEATHERS = {
     'transactions': '/tmp/transactions.feather',
@@ -111,7 +111,14 @@ def _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(df, port
     '''
     with ShadyBar('Linking', max=len(df)) as bar:
         for i, dfrow in df.iterrows():
-            ticker = dfrow.symbol
+            # The DataFrame was created from transactions (export downloaded from Robinhood.
+            # That means it will contain some symbols no longer in service, which we call
+            # tockers.  It's necessary then, to attribute these old-symbol transactions to their
+            # new ticker symbol.
+            tocker = dfrow.symbol
+            ticker = api.tocker2ticker(tocker)
+
+            # If we no longer hold this symbol, we skip this iteration of the loop
             if ticker not in portfolio:
                 bar.next()
                 continue
@@ -244,7 +251,7 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         urgency=D,
         activities=str,
     )
-    header.update({field: cfg['typ'] for field, cfg in C.items()})
+    header.update(fields.types())
 
     data = []
     with ShadyBar('Processing', max=len(portfolio)) as bar:
@@ -345,7 +352,7 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 activities=activities,
                 next_expiry=next_expiry,
             )
-            row.update(fields.rows(ticker))
+            row.update(fields.row(ticker))
             data.append(row)
 
             bar.next()

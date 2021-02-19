@@ -14,14 +14,10 @@ import events
 
 
 class Stock:
-    #todo move this to api and make dynamic
-    mappings = {
-        'FCAU': 'STLA'
-    }
-
     def __init__(self, account, ticker):
         self.account = account
-        self.ticker = Stock.mappings.get(ticker, ticker)
+        self.ticker = ticker
+        self.tockers = api.tockers4ticker(ticker)
 
         self._quantity = 0
         self._ledger = []
@@ -31,19 +27,22 @@ class Stock:
         self.pointer = 0
         self.events = []
 
-        self.splits = [
-            events.StockSplitEvent(
-                stock=self,
-                date=ss['exDate'],
-                divisor=ss['fromFactor'],
-                multiplier=ss['toFactor'],
-            ) for ss in api.splits(self.ticker)
-        ]
+        self.splits = []
+        for ticker in self.tockers:
+            self.splits.extend(
+                events.StockSplitEvent(
+                    stock=self,
+                    date=ss['exDate'],
+                    divisor=ss['fromFactor'],
+                    multiplier=ss['toFactor'],
+                ) for ss in api.splits(ticker) if not api.is_black(ticker)
+            )
+        self.splits.sort(key=lambda ss: ss.date)
 
-        # StockSplits - These splits take effect whenever the query date and the buy date
-        # lie on different sides of the split date.  That means, that the buy event needs to
-        # know "who's asking", or more specifically, "when's asking?", in order to answer
-        # correctly.
+        # StockSplits - These splits take effect on queries anytime the date of the question
+        # and the date of the buy date lie on different sides of a split date.  That means, that
+        # the buy event needs to know "who's asking", or more specifically, "when's asking?", in
+        # order to answer meaningfully.
         self._pool = self.splits[:]
 
 
@@ -65,6 +64,21 @@ class Stock:
     @property
     def marketcap(self):
         return D(api.marketcap(self.ticker))
+
+    @property
+    def sector(self):
+        return api.sector(self.ticker)
+
+    @property
+    def shoutstanding(self):
+        return api.shares_outstanding(self.ticker)
+
+    @property
+    def intrades(self):
+        return {
+            t['transactionDate']: D(t['transactionShares'])
+            for t in api.insider_transactions(self.ticker)
+        }
 
     @property
     def stats(self):

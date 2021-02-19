@@ -8,30 +8,24 @@ import util
 from util.numbers import D
 
 
-PORTFOLIO = {}
-
-
-def __getattr__(ticker: str) -> stocks.Stock:
-    return PORTFOLIO[ticker.upper()]
-
-
-#@util.singleton
 class Account:
+    PORTFOLIO = {}
+
     def __init__(self, tickers=()):
         self._transactions = slurp.transactions()
 
         portfolio_is_complete = bool(len(tickers) == 0)
 
-        PORTFOLIO.update({
+        Account.PORTFOLIO.update({
             ticker: stocks.Stock(self, ticker)
             for ticker in (
                 api.symbols() if portfolio_is_complete else tickers
-            )
+            ) if not api.is_black(ticker)
         })
 
         self._stocks = slurp.stocks(
             self._transactions,
-            PORTFOLIO,
+            Account.PORTFOLIO,
             portfolio_is_complete=portfolio_is_complete,
         )
 
@@ -67,7 +61,7 @@ class Account:
         # }=-
 
     def get_stock(self, ticker):
-        return PORTFOLIO[ticker]
+        return Account.PORTFOLIO[ticker]
 
     @property
     def transactions(self):
@@ -79,4 +73,8 @@ class Account:
 
     @property
     def portfolio(self):
-        return PORTFOLIO.ITEMS()
+        return Account.PORTFOLIO.items()
+
+
+def __getattr__(ticker: str) -> stocks.Stock:
+    return Account.PORTFOLIO[ticker.upper()]

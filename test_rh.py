@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 import rh
 import api
+import util
 import slurp
 import account
 from util.numbers import D
@@ -153,19 +154,22 @@ def answers(index):
 @unittest.mock.patch('util.datetime.now')
 @unittest.mock.patch('api.rh.stocks.get_latest_price')
 @unittest.mock.patch('api.price')
-@unittest.mock.patch('api.prices')
-def test_stock(iex_prices, iex_price, rh_get_latest_price, now, index, price, key):
+@unittest.mock.patch('api._price_agg')
+def test_stock(iex_price_agg, iex_price, rh_get_latest_price, now, index, price, key):
     iex_price.return_value = price
-    iex_prices.return_value = { 'AAPL': price }
+    iex_price_agg.return_value = {'AAPL': price}
+    rh_get_latest_price.return_value = [price]
 
-    rh_get_latest_price.return_value = [ price ]
     now.return_value = index2date(index)
+    assert util.datetime.now() == index2date(index)
 
     if index > 7: return
-
     acc = account.Account(tickers=['AAPL'])
+
     stock = acc.get_stock('AAPL')
+    assert len(api.splits('AAPL')) == 1
+    assert len(stock.splits) == 1
+
     ledger = stock._ledger[index]
     answer = answers(index)
-
     assert ledger[key] == answer[key]

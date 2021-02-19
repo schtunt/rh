@@ -2,7 +2,7 @@ import time
 import json
 import decimal, datetime
 
-from pprint import pformat
+from pprint import pp
 
 from pygments import highlight
 from pygments.lexers import PythonLexer
