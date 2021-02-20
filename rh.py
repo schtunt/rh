@@ -40,17 +40,18 @@ VIEWS = [
     {
         'configurations': [
             { 'title': 'movers', 'sort_by': 'change', 'filter_by': 'movers' },
+            { 'title': 'all', 'sort_by': 'change' },
         ],
         'fields': [
             'ticker',
             'marketcap',
             'ma', 'd200ma', 'd50ma', 'pcp', 'price',
-            'change',
             'esp',
             'quantity',
             'alerts',
             'pe_ratio', 'pb_ratio', 'beta',
-            'equity', 'equity_change', 'percent_change',
+            'equity', 'equity_change',
+            'percent_change', 'change',
             'premium_collected', 'dividends_collected',
             'activities',
             'trd0',

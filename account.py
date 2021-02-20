@@ -3,6 +3,7 @@ import stocks
 import slurp
 
 import pandas as pd
+import scipy.stats
 
 import util
 from util.numbers import D
@@ -28,9 +29,11 @@ class Account:
             Account.PORTFOLIO,
             portfolio_is_complete=portfolio_is_complete,
         )
+        #self._stocks.reset_index(inplace=True)
+        #self._stocks.set_index('ticker', inplace=True)
 
-        S = self._stocks
         T = self._transactions
+        S = self._stocks
 
         # Embelishments -={
         slurp.embelish(
@@ -62,6 +65,17 @@ class Account:
 
     def get_stock(self, ticker):
         return Account.PORTFOLIO[ticker]
+
+    def momentum(self, ticker):
+        S = self._stocks
+        return {
+            change: scipy.stats.percentileofscore(
+                pd.to_numeric(S[change]),
+                pd.to_numeric(list(S.loc[S['ticker']==ticker, change])),
+            ) for change in (
+                'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp'
+            )
+        }
 
     @property
     def transactions(self):
