@@ -93,8 +93,22 @@ FIELDS = {
         description='5-Day Percentage Change',
         documentation='',
     ),
+    'trd0': Field(
+        getter=None,
+        pullcast=None,
+        pushcast=lambda d: util.color.qty0(util.datetime.age(d)),
+        description='Day-Zero Trade',
+        documentation='',
+    ),
+    'momentum': Field(
+        getter=None,
+        pullcast=None,
+        pushcast=util.color.pct,
+        description='Momentum Percentile (compared to the rest of this Portfolio)',
+        documentation='',
+    ),
 }
 
-row = lambda ticker: {header: field.getter(ticker) for header, field in FIELDS.items()}
-types = lambda: {header: field.pullcast for header, field in FIELDS.items()}
+row = lambda ticker: {header: field.getter(ticker) for header, field in FIELDS.items() if field.getter}
+types = lambda: {header: field.pullcast for header, field in FIELDS.items() if field.pullcast}
 formaters = lambda: {header: field.pushcast for header, field in FIELDS.items()}

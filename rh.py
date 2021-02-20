@@ -39,8 +39,7 @@ CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 VIEWS = [
     {
         'configurations': [
-            { 'title': 'movers', 'sort_by': 'change', 'filter_by': 'movers' },
-            { 'title': 'all', 'sort_by': 'change' },
+            { 'title': 'all', 'sort_by': ['change'] },
         ],
         'fields': [
             'ticker',
@@ -48,18 +47,18 @@ VIEWS = [
             'ma', 'd200ma', 'd50ma', 'pcp', 'price',
             'esp',
             'quantity',
-            'alerts',
-            'pe_ratio', 'pb_ratio', 'beta',
+            'pe_ratio', 'pb_ratio',
             'equity', 'equity_change',
             'percent_change', 'change',
             'premium_collected', 'dividends_collected',
             'activities',
             'trd0',
+            'momentum',
         ],
     },
     {
         'configurations': [
-            { 'title': 'active', 'sort_by': 'urgency', 'filter_by': 'next_expiry' },
+            { 'title': 'active', 'sort_by': ['urgency'], 'filter_by': 'next_expiry' },
         ],
         'fields': [
             'ticker', 'percentage',
@@ -74,8 +73,8 @@ VIEWS = [
     },
     {
         'configurations': [
-            { 'title': 'expiring', 'sort_by': 'urgency', 'filter_by': 'soon_expiring' },
-            { 'title': 'urgent', 'sort_by': 'next_expiry', 'filter_by': 'urgent' },
+            { 'title': 'expiring', 'sort_by': ['urgency'], 'filter_by': 'soon_expiring' },
+            { 'title': 'urgent', 'sort_by': ['next_expiry'], 'filter_by': 'urgent' },
         ],
         'fields': [
             'ticker', 'percentage',
@@ -90,7 +89,7 @@ VIEWS = [
     },
     {
         'configurations': [
-            { 'title': 'tax', 'sort_by': 'ticker' }
+            { 'title': 'tax', 'sort_by': ['ticker'] }
         ],
         'fields': [
             'ticker',
@@ -121,7 +120,6 @@ FORMATERS = {
     'pe_ratio': util.color.qty,
     'pb_ratio': util.color.qty,
     'percentage': util.color.pct,
-    'beta': util.color.qty,
     'delta': util.color.qty,
     'short': util.color.qty1,
     'premium_collected': util.color.mulla,
@@ -143,7 +141,6 @@ FORMATERS = {
     'news': util.color.qty,
     'next_expiry': util.datetime.ttl,
     'urgency': util.color.mpctr,
-    'trd0': util.datetime.age,
 }
 FORMATERS.update(fields.formaters())
 
@@ -152,7 +149,6 @@ FILTERS = {
     'active': lambda d: len(d['activities']),
     'next_expiry': lambda d: d['next_expiry'] is not pd.NaT,
     'soon_expiring': lambda d: d['next_expiry'] is not pd.NaT and util.datetime.ttl(d['next_expiry']) < 7,
-    'movers': lambda d: abs(d['change']) >= 5,
     'urgent': lambda d: d['urgency'] > 0.8,
 }
 
@@ -161,7 +157,7 @@ for cfg in VIEWS:
     fields = cfg['fields']
     for view in cfg['configurations']:
         _VIEWS[view['title']] = dict(
-            sort_by=view.get('sort_by', 'ticker'),
+            sort_by=view.get('sort_by', ['ticker']),
             filter_by=FILTERS[view.get('filter_by', None)],
             fields=fields,
         )
@@ -169,9 +165,9 @@ for cfg in VIEWS:
 @cli.command(help='Views')
 @click.option('-t', '--tickers', multiple=True, default=None)
 @click.option('-v', '--view', default='expiring', type=click.Choice(_VIEWS.keys()))
-@click.option('-s', '--sort-by', default=False, type=str)
+@click.option('-s', '--sort-by', multiple=True, default=[])
 @click.option('-r', '--reverse', default=False, is_flag=True, type=bool)
-@click.option('-l', '--limit', default=-1, type=int)
+@click.option('-l', '--limit', default=0, type=int)
 @click.pass_context
 def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     debug = ctx.obj['debug']
@@ -179,7 +175,7 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     acc = account.Account(tickers)
 
     columns = _VIEWS[view]['fields']
-    sort_by = _VIEWS[view]['sort_by']
+    sort_by = _VIEWS[view]['sort_by'] if len(sort_by) == 0 else sort_by
     filter_by = _VIEWS[view]['filter_by']
 
     table = util.output.mktable(
@@ -190,7 +186,7 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
         filter_by=filter_by,
         sort_by=sort_by,
         reverse=reverse,
-        limit=limit
+        limit=limit,
     )
     util.output.prtable(table)
 
@@ -222,14 +218,14 @@ def repl():
     module = sys.modules[__name__]
 
     print("Done! Available ticker objects:")
-    print(" + rh.acc           (Local Robinhood Account object)")
-    print(" + rh.acc.rh        (RobinStocksEndpoint API)")
-    print(" + rh.acc.iex       (IEXFinanceEndpoint API)")
-    print(" + rh.acc.yec       (YahooEarningsCalendarEndpoint API)")
-    print(" + rh.acc.finhubb   (FinnhubEndpoint API)")
-    print(" + rh.acc.ml        (MonkeyLearnEndpoint API)")
-    print(" + rh._<ticker>     (IEXFinanceEndpoint Stock object API)")
-    print(" + rh.<ticker>      (Local Stock object API multiplexor")
+    print(" + api.acc          (Local Robinhood Account object)")
+    print()
+    print(" + api.rh           (RobinStocksEndpoint API)")
+    print(" + api.iex          (IEXFinanceEndpoint API)")
+    print(" + api.yec          (YahooEarningsCalendarEndpoint API)")
+    print()
+    print(" + account.<ticker> (Local Stock object API multiplexor)")
+    print(" + api.<ticker>     (IEXFinanceEndpoint Stock API object)")
     print()
     print("Meta-helpers for this REPL")
     print(" + relmod()         (reload wthout having to exit the repl)")

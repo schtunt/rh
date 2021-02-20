@@ -2,6 +2,8 @@ import time
 import json
 import decimal, datetime
 
+import pandas as pd
+
 from pprint import pp
 
 from pygments import highlight
@@ -13,7 +15,11 @@ from beautifultable import BeautifulTable
 import constants
 from constants import ZERO as Z
 
-def dprintf(fmt, *args):
+def dprintf(fmt, *args, force=False):
+    # Need to pass in some debug flag
+    if force is False:
+        return
+
     print(fmt % args)
 
 
@@ -70,44 +76,55 @@ def prtable(table):
     table.columns.header = columns
 
 def mktable(
-    data,
+    df,
     columns,
     formats,
     maxwidth=320,
     tickers=(),
     filter_by=None,
-    sort_by='ticker',
+    sort_by=['ticker'],
     reverse=False,
-    limit=None
+    limit=0
 ):
+    # 1. filter columns
+    df = df[columns]
 
-    # 0. create
+    # 2. sort dataframe
+    df = df.sort_values(by=list(sort_by))
+
+    # 3. limit (or butterfly-limit (-limit)) dataframe
+    l = len(df)
+    if l > limit > 0:
+        df = df.tal(limit) if not reverse else df.head(limit)
+    elif limit < 0:
+        # butterfly-limit (remove from center point out to the wings/extremes)
+        halflimit = -limit
+        if l > 2 * halflimit:
+            df = pd.concat([
+                df.head(halflimit),
+                df.tail(halflimit),
+            ], axis=0)
+
+    # 4. create table
     table = BeautifulTable(maxwidth=maxwidth)
 
-    # 1. configure
+    # 5. configure table
     table.set_style(BeautifulTable.STYLE_GRID)
     table.columns.header = columns
     if 'activate' in columns:
         table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
 
-    # 2. populate
-    for i, datum in data:
-        table.rows.append(map(lambda k: datum.get(k, Z), columns))
+    # 6. populate table
+    for ticker, datum in df.iterrows():
+        table.rows.append(datum)
 
-    # 3. filter
+    # 7. filter table rows
     if filter_by is not None:
         table = table.rows.filter(filter_by)
     if len(tickers) > 0:
         table = table.rows.filter(lambda row: row['ticker'] in tickers)
 
-    # 4. sort
-    table.rows.sort(key=sort_by, reverse=reverse)
-
-    # 5. limit
-    if limit > 0:
-        table = table.rows[:limit] if not reverse else table.rows[-limit:]
-
-    # 6. format
+    # 8. format table cells
     for index, column in enumerate(columns):
         rows, fn = table.columns[index], formats.get(column, None)
         if fn is not None:

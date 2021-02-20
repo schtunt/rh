@@ -1,9 +1,10 @@
 import os
 
-from collections import defaultdict
 from functools import reduce
 import pandas as pd
 import datetime
+from collections import defaultdict
+from collections import OrderedDict
 
 import api
 import constants
@@ -14,6 +15,7 @@ from progress.bar import ShadyBar
 
 from util.numbers import D
 from util.color import strip as S
+from util.output import dprintf
 from constants import ZERO as Z
 
 FEATHERS = {
@@ -27,7 +29,7 @@ def embelish(obj, attributes, column, chain):
         reduce(
             lambda g, f: f(g),
             chain,
-            components,
+            OrderedDict(zip(attributes, components)),
         ) for components in zip(*map(lambda attr: getattr(obj, attr), attributes))
     ]
 
@@ -56,26 +58,27 @@ def transactions():
     '''
     feather = FEATHERS['transactions']
     if os.path.exists(feather):
-        print("0. Returned DataFrame from %s and return immediately" % feather)
         df = pd.read_parquet(feather)
         return df
 
-    print("1. Download Stock Transactions from Robinhood...")
-    imported = api.download('stocks')
-
-    print("2. Import Stock Transaction data to Pandas DataFrame")
-    header = pd.read_csv(imported, comment='#', nrows=0).columns
-    df = pd.read_csv(imported, comment='#', converters=dict(
-        date=util.datetime.dtp.parse,
-        fees=D,
-        quantity=D,
-        average_price=D,
-    ))
-
-    print("3. Update Stocks Transaction history with position-altering Options Contracts...")
-    # Update the dataframe with stocks bought and sold via the options market:
     symbols = api.symbols()
-    with ShadyBar('Processing', max=len(symbols)) as bar:
+    with ShadyBar('%32s' % 'Building Transactions', max=len(symbols)+2) as bar:
+        # 1. Download Stock Transactions from Robinhood...
+        imported = api.download('stocks')
+        bar.next()
+
+        # 2. Import Stock Transaction data to Pandas DataFrame
+        header = pd.read_csv(imported, comment='#', nrows=0).columns
+        df = pd.read_csv(imported, comment='#', converters=dict(
+            date=util.datetime.dtp.parse,
+            fees=D,
+            quantity=D,
+            average_price=D,
+        ))
+        bar.next()
+
+        # 3. Update Stocks Transaction history with position-altering Options Contracts...
+        #    (stocks bought/sold via the options market (assigments and excercises)
         for ticker in symbols:
             for se in api.events(ticker):
                 for ec in se['equity_components']:
@@ -92,11 +95,13 @@ def transactions():
                     )
             bar.next()
 
-    print("4. Sort DataFrame")
+    dprintf("4. Sort DataFrame")
     df = df.sort_values(by='date')
 
+    #df.set_index(['timestamp', 'symbol'], inplace=True)
+
     if 'test' not in feather:
-        print("5. Dump DataFrame to Feather")
+        dprintf("5. Dump DataFrame to Feather")
         df.to_parquet(feather)
 
     return df
@@ -109,7 +114,7 @@ def _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(df, port
 
     DataFrame Update 3 - Ledger Data
     '''
-    with ShadyBar('Linking', max=len(df)) as bar:
+    with ShadyBar('%32s' % 'Building Transactions Graph', max=len(df)) as bar:
         for i, dfrow in df.iterrows():
             # The DataFrame was created from transactions (export downloaded from Robinhood.
             # That means it will contain some symbols no longer in service, which we call
@@ -159,121 +164,127 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         # select tickers).  If a cache file does not exists already, that means this is the
         # time to create it.  For that to happen, the expensive linking process needs to take
         # place here.
-        print("0. Create and link Python Stock objects, then slurp Stock ledgers to DataFrame...")
         _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(
             transactions,
             portfolio
         )
     elif cache_exists:
-        print("0. Returned DataFrame from %s and return immediately" % feather)
+        dprintf("0. Returned DataFrame from %s and return immediately" % feather)
         df = pd.read_parquet(feather)
         return df
 
     now = util.datetime.now()
 
-    print("1. Pull holdings")
-    holdings = api.holdings()
+    with ShadyBar('%32s' % 'Building Stocks', max=len(portfolio)+12) as bar:
+        # 1. Pull holdings
+        holdings = api.holdings()
+        bar.next()
 
-    print("2. Pull Prices, Quotes, and Betas")
-    prices = { ticker: D(price) for ticker, price in api._price_agg().items() }
-    betas  = { ticker: D(beta) for ticker, beta in api._beta_agg().items() }
+        # 2. Pull Prices
+        prices = { ticker: D(price) for ticker, price in api._price_agg().items() }
+        bar.next()
 
-    print("3. Pull Option Positions (collaterals, next_expiry, and an `opened' blob)")
-    data = _option_positions(prices)
-    collaterals = data['collaterals']
-    next_expiries = data['next_expiries']
-    opened = data['opened']
-    urgencies = data['urgencies']
-    del data
+        # 3. Pull Betas
+        betas  = { ticker: D(beta) for ticker, beta in api._beta_agg().items() }
+        bar.next()
 
-    print("4. Pull Options Orders (premiums and a `closed' blob)")
-    data = _option_orders()
-    premiums = data['premiums']
-    closed = data['closed']
-    del data
+        # 4. Pull Option Positions
+        data = _option_positions(prices)
+        collaterals = data['collaterals']
+        next_expiries = data['next_expiries']
+        urgencies = data['urgencies']
+        opened = data['opened']
+        bar.next()
+        del data
 
-    print("5. Pull Stock Orders (blob)")
-    stock_orders = _stock_orders()
+        # 5. Pull Options Orders
+        data = _option_orders()
+        premiums = data['premiums']
+        closed = data['closed']
+        bar.next()
+        del data
 
-    print("6. Pull Dividends data")
-    dividends = api.dividends()
+        # 6. Pull Stock Orders (blob)
+        stock_orders = _stock_orders()
+        bar.next()
 
-    print("7. Per-Ticker Operations...")
-    header = dict(
-        ticker=str,
-        price=D, # current stock price
-        pcp=D,   # previous closing price
-        quantity=D,
-        average_buy_price=D, # your average according to robinhood
-        equity=D,
-        percent_change=D, # total return
-        equity_change=D, # total return
-        type=str, # stock or adr
-        name=str,
-        pe_ratio=D,
-        percentage=D,
+        # 7. Pull Dividends data
+        dividends = api.dividends()
+        bar.next()
 
-        cnt=D,
-        trd=D,
-        qty=D,
-        esp=D,
+        # 8. Per-Ticker Operations (deprecated method, see (9.)
+        header = dict(
+            ticker=str,
+            price=D, # current stock price
+            pcp=D,   # previous closing price
+            quantity=D,
+            average_buy_price=D, # your average according to robinhood
+            equity=D,
+            percent_change=D, # total return
+            equity_change=D, # total return
+            type=str, # stock or adr
+            name=str,
+            pe_ratio=D,
+            percentage=D,
 
-        crsq=D,
-        crsv=D,
-        crlq=D,
-        crlv=D,
-        cusq=D,
-        cusv=D,
-        culq=D,
-        culv=D,
+            cnt=D,
+            trd=D,
+            qty=D,
+            esp=D,
 
-        premium_collected=D,
-        dividends_collected=D,
-        pe_ratio2=D,
-        pb_ratio=D,
-        collateral_call=D,
-        collateral_put=D,
-        next_expiry=datetime.datetime,
-        ttl=D,
+            crsq=D,
+            crsv=D,
+            crlq=D,
+            crlv=D,
+            cusq=D,
+            cusv=D,
+            culq=D,
+            culv=D,
 
-        urgency=D,
-        activities=str,
-    )
-    header.update(fields.types())
+            premium_collected=D,
+            dividends_collected=D,
+            pe_ratio2=D,
+            pb_ratio=D,
+            collateral_call=D,
+            collateral_put=D,
+            next_expiry=datetime.datetime,
+            ttl=D,
 
-    data = []
-    with ShadyBar('Processing', max=len(portfolio)) as bar:
+            urgency=D,
+            activities=str,
+        )
+        bar.next()
+
+        # 9. Per-Ticker Operations
+        header.update(fields.types())
+        bar.next()
+
+        data = []
         for ticker, stock in portfolio.items():
-            #print(f"8.1. [{ticker}] Update the dataframe")
             if ticker not in holdings:
-                #print("8.1.1 Skipping stock no longer held - %s" % ticker)
                 bar.next()
                 continue
 
             holding = holdings[ticker]
 
-            #print(f"8.2. [{ticker}] Cost Basis (realized)")
             cbr = stock.costbasis(realized=True, when=now)
             crsq = cbr['short']['qty']
             crsv = cbr['short']['value']
             crlq = cbr['long']['qty']
             crlv = cbr['long']['value']
 
-            #print(f"8.3. [{ticker}] Cost Basis (unrealized)")
             cbu = stock.costbasis(realized=False, when=now)
             cusq = cbu['short']['qty']
             cusv = cbu['short']['value']
             culq = cbu['long']['qty']
             culv = cbu['long']['value']
 
-            #print(f"8.5. [{ticker}] Prices & Quotes (if missing)")
             if ticker not in prices:
                 prices[ticker] = api.price(ticker)
 
             if ticker not in betas:
                 betas[ticker] = api.beta(ticker)
 
-            #print("8.6. [{ticker}] Activities blob")
             _opened = '\n'.join(opened.get(ticker, []))
             _closed = '\n'.join(closed.get(ticker, []))
             _collateral = D(collaterals[ticker]['call'])
@@ -332,31 +343,33 @@ def stocks(transactions, portfolio, portfolio_is_complete):
             )
             row.update(fields.row(ticker))
             data.append(row)
-
             bar.next()
 
-    print("9. Import Python data to Pandas DataFrame")
-    df = pd.DataFrame(
-        [[row[key] for key in header] for row in data],
-        columns=header,
-    )
+        # 10. Import Python data to Pandas DataFrame
+        df = pd.DataFrame(
+            [[row[key] for key in header] for row in data],
+            columns=header,
+        )
+        bar.next()
 
-    print("10. Sort the DataFrame")
-    df = df.sort_values(by='ticker')
+        # 11. Sort the DataFrame
+        df = df.sort_values(by='ticker')
+        bar.next()
 
-    if not cache_exists and portfolio_is_complete and 'test' not in feather:
-        print("11. Dump to feather")
-        df.to_parquet(feather)
-    elif not portfolio_is_complete and cache_exists:
-        # Update the main Feather DataFrame (on-disk) with the partial data we just
-        # retrieved.
-        print("11. Partial update and dump to feather")
-        dfm = pd.read_parquet(feather)
-        columns = list(dfm.columns)
-        dfm.set_index(keys=columns, inplace=True)
-        dfm.update(df.set_index(columns))
-        dfm.reset_index(inplace=True)
-        dfm.to_parquet(feather)
+        # 12. Dump to file, conditionally, fully or partially
+        #df.set_index('ticker', inplace=True)
+        if not cache_exists and portfolio_is_complete and 'test' not in feather:
+            df.to_parquet(feather)
+        elif not portfolio_is_complete and cache_exists:
+            # Update the main Feather DataFrame (on-disk) with the partial data we just
+            # retrieved.
+            dfm = pd.read_parquet(feather)
+            columns = list(dfm.columns)
+            dfm.set_index(keys=columns, inplace=True)
+            dfm.update(df.set_index(columns))
+            dfm.reset_index(inplace=True)
+            dfm.to_parquet(feather)
+        bar.next()
 
     return df
 

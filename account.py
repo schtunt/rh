@@ -4,6 +4,7 @@ import slurp
 
 import pandas as pd
 import scipy.stats
+import statistics
 
 import util
 from util.numbers import D
@@ -40,7 +41,10 @@ class Account:
             obj=S,
             attributes=('d200ma', 'd50ma', 'price',),
             column='ma',
-            chain=(util.numbers.growth_score, D),
+            chain=(
+                lambda data: data.values(),
+                lambda data: util.numbers.growth_score(data),
+            ),
         )
 
         slurp.embelish(
@@ -48,7 +52,7 @@ class Account:
             attributes=('ticker',),
             column='trd0',
             chain=(
-                lambda attrs: T[T['symbol'] == attrs[0]].date,
+                lambda data: T[T['symbol'] == data['ticker']].date,
                 lambda dates: min(dates) if len(dates) else pd.NaT,
             )
         )
@@ -58,20 +62,42 @@ class Account:
             attributes=('price', 'pcp'),
             column='change',
             chain=(
-                lambda attrs: 100 * (attrs[0] / attrs[1] - 1),
+                lambda data: 100 * (data['price'] / data['pcp'] - 1),
             )
         )
+
+        slurp.embelish(
+            obj=S,
+            attributes=('ticker', 'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp'),
+            column='momentum',
+            chain=(
+                lambda data: { data.pop('ticker'): data },
+                lambda data: [
+                    scipy.stats.percentileofscore(
+                        pd.to_numeric(S[period]),
+                        pd.to_numeric(percentile),
+                    ) for ticker, percentiles in data.items()
+                    for period, percentile in percentiles.items()
+                ],
+                statistics.mean,
+            )
+        )
+
         # }=-
 
     def get_stock(self, ticker):
         return Account.PORTFOLIO[ticker]
 
     def momentum(self, ticker):
+        '''
+        Comparitive Momentum between this ticker, and all other tickers in portfolio
+        '''
+        ticker = ticker.upper()
         S = self._stocks
         return {
             change: scipy.stats.percentileofscore(
-                pd.to_numeric(S[change]),
-                pd.to_numeric(list(S.loc[S['ticker']==ticker, change])),
+                S[change].to_numpy(),
+                S.loc[S['ticker']==ticker, change].to_numpy(),
             ) for change in (
                 'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp'
             )
@@ -79,11 +105,11 @@ class Account:
 
     @property
     def transactions(self):
-        return self._transactions.iterrows()
+        return self._transactions
 
     @property
     def stocks(self):
-        return self._stocks.iterrows()
+        return self._stocks
 
     @property
     def portfolio(self):
@@ -91,4 +117,8 @@ class Account:
 
 
 def __getattr__(ticker: str) -> stocks.Stock:
+    _ticker = ticker.upper()
+    if _ticker not in api.symbols():
+        raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
+
     return Account.PORTFOLIO[ticker.upper()]
