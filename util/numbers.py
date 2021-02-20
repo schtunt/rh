@@ -21,13 +21,9 @@ scale_and_shift = lambda p, x: (p*x+1)/2
 
 # An increasing sequence will have a score of zero, and the further from that the series is,
 # the worse the score will be.  Worst case is a reverse-sorted sequence.
-growth_score = lambda series: dec(
-    math.sqrt(
-        sum(
-            map(
-                lambda n: dec(n[0] - n[1]) ** 2,
-                zip(series, sorted(series))
-            )
-        )
+growth_score = lambda series: sum(
+    map(
+        lambda n: (dec(n[0]) - dec(n[1])) ** 2,
+        zip(series, sorted(series))
     )
-)
+).sqrt()

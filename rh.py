@@ -125,8 +125,6 @@ FORMATERS = {
     'short': util.color.qty1,
     'premium_collected': util.color.mulla,
     'dividends_collected': util.color.mulla,
-    'd200ma': util.color.qty,
-    'd50ma': util.color.qty,
     'ma': util.color.qty,
     'cuq': util.color.qty,
     'cuv': util.color.mulla,
