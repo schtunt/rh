@@ -2,6 +2,6 @@
 
 source "$(dirname "${0}")/.venv/bin/activate"
 
-pytest --stepwise -v test_rh.py
+pytest --cov-report term-missing --cov=rh --stepwise test_rh.py
 
 exit $?
