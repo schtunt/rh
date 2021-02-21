@@ -61,6 +61,12 @@ FIXTURES = {
     },
     'rh': {
         'get_events': [],
+        'build_user_profile': {
+            'equity': 0,
+            'extended_hours_equity': 0,
+            'cash': 0,
+            'dividend_total': 0,
+        },
     },
     'rh.account': {
         'build_holdings': {

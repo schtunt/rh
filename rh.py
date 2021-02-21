@@ -28,8 +28,8 @@ def cli(ctx, debug, clear_cache):
     ctx.obj['debug'] = debug
 
     if clear_cache:
-        from slurp import FEATHERS
-        for fn in FEATHERS.values():
+        from slurp import feathers
+        for fn in feathers():
             if os.path.exists(fn):
                 os.unlink(fn)
 
@@ -43,8 +43,10 @@ VIEWS = [
         ],
         'fields': [
             'ticker',
-            'marketcap',
-            'ma', 'd200ma', 'd50ma', 'pcp', 'price',
+            'marketcap', 'beta',
+            'sharpe', 'treynor',
+            'ma', 'd200ma', 'd50ma',
+            'pcp', 'price',
             'esp',
             'quantity',
             'pe_ratio', 'pb_ratio',

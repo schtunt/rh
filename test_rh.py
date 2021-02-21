@@ -25,6 +25,7 @@ import rh
 import api
 import util
 import slurp
+import models
 import fields
 import account
 from util.numbers import D
@@ -38,10 +39,17 @@ def module_mock_initialize(module_mocker):
     with open(cachefile, 'w') as fH:
         fH.write(CSV)
 
-    slurp.FEATHERS.update({
-        'transactions': '/tmp/test-transactions.feather',
-        'stocks': '/tmp/test-stocks.feather',
-    })
+    slurp.FEATHER_BASE = '/tmp/tests'
+    if not os.path.exists(slurp.FEATHER_BASE):
+        os.mkdir(slurp.FEATHER_BASE)
+
+    module_mocker.patch.object(models, 'treynor', unittest.mock.MagicMock(**dict(
+        return_value=D(1)
+    )))
+
+    module_mocker.patch.object(models, 'sharpe', unittest.mock.MagicMock(**dict(
+        return_value=D(1)
+    )))
 
     module_mocker.patch.object(api, 'download', unittest.mock.MagicMock(
         return_value=cachefile
@@ -145,12 +153,14 @@ def answers(index):
         ][index][j]) for j, key in enumerate(ANSWER_KEYS)
     }
 
-
 @unittest.mock.patch('util.datetime.now')
 @unittest.mock.patch('api.rh.stocks.get_latest_price')
 @unittest.mock.patch('api.price')
 @unittest.mock.patch('api._price_agg')
-def test_stock(iex_price_agg, iex_price, rh_get_latest_price, now, index, price, key):
+def test_stock(
+    iex_price_agg, iex_price, rh_get_latest_price, now,
+    index, price, key
+):
     iex_price.return_value = price
     iex_price_agg.return_value = {'AAPL': price}
     rh_get_latest_price.return_value = [price]

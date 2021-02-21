@@ -1,6 +1,7 @@
 import api
 import stocks
 import slurp
+import models
 
 import pandas as pd
 import scipy.stats
@@ -30,8 +31,19 @@ class Account:
             portfolio_is_complete=portfolio_is_complete,
         )
 
+        profile = api.rh.build_user_profile()
+        self._equity = D(profile['equity'])
+        self._extended_hours_equity = D(profile['extended_hours_equity'])
+        self._cash = D(profile['cash'])
+        self._dividends_total = D(profile['dividend_total'])
+
     def get_stock(self, ticker):
         return Account.PORTFOLIO[ticker]
+
+    def sharpe(self):
+        data = models.sharpe(holdings=api.holdings())
+        util.debug.ddump(data, force=True)
+        return data
 
     def momentum(self, ticker):
         '''

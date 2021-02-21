@@ -23,7 +23,7 @@ def measure(func):
     return timed
 
 def measurements():
-    util.output.ddump(MEASURED)
+    util.debug.ddump(MEASURED)
 
 
 
@@ -56,6 +56,7 @@ TICKER_CHAIN.update({
 
 TICKER_BLACKLIST = set((
     'AABAZZ',
+    'AABA',
 ))
 TICKER_BLACKLIST |= set(tocker for chain in TICKER_CHAIN.values() for tocker in chain)
 
@@ -263,7 +264,7 @@ def events(ticker):
 # IEX Aggregation -={
 IEX_AGGREGATOR = defaultdict(dict)
 def _iex_aggregator(fn_name, ticker=None):
-    #util.output.ddump(IEX_AGGREGATOR, force=True)
+    #util.debug.ddump(IEX_AGGREGATOR, force=True)
 
     agg = IEX_AGGREGATOR[fn_name]
     if len(agg) == 0:

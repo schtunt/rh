@@ -12,6 +12,7 @@ import util.debug
 import slurp
 import events
 import stocks
+import models
 import account
 import constants
 
@@ -26,6 +27,7 @@ def relmod():
     importlib.reload(account)
     importlib.reload(stocks)
     importlib.reload(slurp)
+    importlib.reload(models)
     importlib.reload(events)
     importlib.reload(util)
     importlib.reload(util.debug)

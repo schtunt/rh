@@ -4,48 +4,13 @@ import decimal, datetime
 
 import pandas as pd
 
-from pprint import pp
-
-from pygments import highlight
-from pygments.lexers import PythonLexer
-from pygments.formatters import Terminal256Formatter
+from . import debug
 
 from beautifultable import BeautifulTable
 
 import fields
 import constants
 from constants import ZERO as Z
-
-def dprintf(fmt, *args, force=False):
-    # Need to pass in some debug flag
-    if force is False:
-        return
-
-    print(fmt % args)
-
-
-def ddump(data, force=False):
-    # Need to pass in some debug flag
-    if force is False:
-        return
-
-    def _dump(obj):
-        class DecimalEncoder(json.JSONEncoder):
-            def default(self, o):
-                if isinstance(o, decimal.Decimal):
-                    return str(o)
-                elif isinstance(o, datetime.datetime):
-                    return str(o)
-                return super(DecimalEncoder, self).default(o)
-
-        return highlight(
-            json.dumps(obj, indent=4, cls=DecimalEncoder),
-            PythonLexer(),
-            Terminal256Formatter()
-        )
-
-    print(_dump(data))
-
 
 class progress:
     def __init__(self, data, title=None, force=True):
@@ -56,7 +21,7 @@ class progress:
     def __enter__(self):
         self._started_at = time.time()
         print('[DEBUG]-=[ %s ]=-', self._title)
-        ddump(self._data, force=self._force)
+        debug.ddump(self._data, force=self._force)
 
     def __exit__(self, exctype, excval, exctraceback):
         self._stopped_at = time.time()

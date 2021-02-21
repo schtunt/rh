@@ -1,6 +1,8 @@
 import os
 
+import pandas_datareader as pddr
 import pandas as pd
+
 import datetime
 from collections import defaultdict
 
@@ -13,20 +15,35 @@ from progress.bar import ShadyBar
 
 from util.numbers import D
 from util.color import strip as S
-from util.output import dprintf
 from constants import ZERO as Z
 
-FEATHERS = {
-    'transactions': '/tmp/transactions.feather',
-    'stocks': '/tmp/stocks.feather',
-}
+FEATHER_BASE='/tmp'
+def feathers():
+    return [
+        featherfile(base) for base in ('transactions', 'stocks')
+    ]
+
+def featherfile(base, ticker=None):
+    featherbase = {
+        'transactions': f'/{FEATHER_BASE}/transactions',
+        'stocks': f'/{FEATHER_BASE}/stocks',
+    }[base]
+
+    if ticker is None:
+        featherfile = f'{featherbase}.feather'
+        return featherfile
+
+    if not os.path.exists(featherbase):
+        os.mkdir(featherbase)
+
+    return f'{featherbase}/{ticker}.feather'
 
 
 def update(column, data):
     '''
     data: dict() keyed by ticker
     '''
-    feather = FEATHERS['stocks']
+    feather = featherfile('stocks')
     if not os.path.exists(feather):
         return False
 
@@ -44,7 +61,7 @@ def transactions():
 
     DataFrame Update 2 - Options information pulled from Robinhood
     '''
-    feather = FEATHERS['transactions']
+    feather = featherfile('transactions')
     if os.path.exists(feather):
         df = pd.read_parquet(feather)
         return df
@@ -102,7 +119,7 @@ def _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(df, port
 
     DataFrame Update 3 - Ledger Data
     '''
-    with ShadyBar('%32s' % 'Building Transactions Graph', max=len(df)) as bar:
+    with ShadyBar('%32s' % 'Building Dependency Graph', max=len(df)) as bar:
         for i, dfrow in df.iterrows():
             # The DataFrame was created from transactions (export downloaded from Robinhood.
             # That means it will contain some symbols no longer in service, which we call
@@ -139,13 +156,34 @@ def _stock_orders():
 
     return stocks,
 
+def stock_historic_prices(ticker, years=7):
+    '''
+    Historic Stock Prices
+
+    '''
+    feather = featherfile('stocks', ticker)
+    if os.path.exists(feather):
+        df = pd.read_parquet(feather)
+        return df
+
+    tNow = util.datetime.now()
+    today = util.datetime.short(tNow)
+
+    # Start 7 years from today
+    tm7y = tNow - 7 * util.datetime.timedelta(days=365)
+    yesteryear = util.datetime.short(tm7y)
+
+    df = pddr.data.DataReader(ticker, data_source='yahoo', start=tm7y, end=tNow)
+    df.to_parquet(feather)
+
+    return df
 
 def stocks(transactions, portfolio, portfolio_is_complete):
     '''
     DataFrame Update 4 - Addtional columns added here from Stock Object calls or other APIs
     '''
 
-    feather = FEATHERS['stocks']
+    feather = featherfile('stocks')
     cache_exists = os.path.exists(feather)
     if not (portfolio_is_complete and cache_exists):
         # The `write' flag implies that the portfolio dataset is not partial (only contains
@@ -249,7 +287,6 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 ticker=ticker,
                 price=prices[ticker],
                 pcp=D(quote['previousClose']),
-                beta=D(betas[ticker]),
                 quantity=holding['quantity'],
                 average_buy_price=holding['average_buy_price'],
                 equity=holding['equity'],
@@ -368,8 +405,6 @@ def _option_orders():
     for option in [o for o in data if o['state'] not in ('cancelled')]:
         ticker = option['chain_symbol']
 
-        util.output.ddump(option)
-
         strategies = []
         o, c = option['opening_strategy'], option['closing_strategy']
         if o:
@@ -384,8 +419,6 @@ def _option_orders():
         for leg in option['legs']:
             uri = leg['option']
             instrument = api.instrument(uri)
-
-            util.output.ddump(instrument)
 
             legs.append('%s to %s K=%s X=%s' % (
                 leg['side'],

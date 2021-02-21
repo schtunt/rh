@@ -281,7 +281,7 @@ class Stock:
                 costbasis[term]['qty'] += available
                 costbasis[term]['value'] += available * (self.price - price)
 
-                #util.output.ddump([when, buy.timestamp, available, self.price, -price], title="stock.costbasis")
+                #util.debug.ddump([when, buy.timestamp, available, self.price, -price], title="stock.costbasis")
 
         return costbasis
 
@@ -370,7 +370,7 @@ class Stock:
         if premiums:
             value += self.account.positions['premiums'][self.ticker]
 
-        #util.output.ddump({
+        #util.debug.ddump({
         #    't': when,
         #    'r': realized,
         #    'u': unrealized,

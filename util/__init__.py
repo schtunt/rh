@@ -15,3 +15,4 @@ from . import numbers
 from . import datetime
 from . import output
 from . import finance
+from . import debug

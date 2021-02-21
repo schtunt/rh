@@ -10,6 +10,7 @@ from collections import OrderedDict
 
 import api
 import util
+import models
 from util.numbers import NaT
 from util.numbers import D
 
@@ -102,6 +103,14 @@ def _extensions(T, S):
             documentation='https://www.investopedia.com/terms/m/marketcapitalization.asp',
         ),
         Field(
+            name='beta',
+            getter=_apidictplucker(api.stats, 'beta'),
+            pullcast=D,
+            pushcast=util.color.qty,
+            description='Beta',
+            documentation='https://www.investopedia.com/terms/b/beta.asp',
+        ),
+        Field(
             name='d50ma',
             getter=_apidictplucker(api.stats, 'day50MovingAvg'),
             pullcast=D,
@@ -184,7 +193,9 @@ def _extensions(T, S):
         Field(
             name='ma',
             getter=FieldComplexConstructor(
-                attributes=('d200ma', 'd50ma', 'price',),
+                attributes=(
+                    'd200ma', 'd50ma', 'price',
+                ),
                 chain=(
                     lambda data: data.values(),
                     lambda data: util.numbers.growth_score(data),
@@ -198,7 +209,9 @@ def _extensions(T, S):
         Field(
             name='trd0',
             getter=FieldComplexConstructor(
-                attributes=('ticker',),
+                attributes=(
+                    'ticker',
+                ),
                 chain=(
                     lambda data: T[T['symbol'] == data['ticker']].date,
                     lambda dates: min(dates) if len(dates) else NaT,
@@ -212,7 +225,9 @@ def _extensions(T, S):
         Field(
             name='change',
             getter=FieldComplexConstructor(
-                attributes=('price', 'pcp'),
+                attributes=(
+                    'price', 'pcp',
+                ),
                 chain=(
                     lambda data: 100 * (data['price'] / data['pcp'] - 1),
                 )
@@ -226,7 +241,8 @@ def _extensions(T, S):
             name='momentum',
             getter=FieldComplexConstructor(
                 attributes=(
-                    'ticker', 'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp'
+                    'ticker',
+                    'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp',
                 ),
                 chain=(
                     lambda data: { data.pop('ticker'): data },
@@ -245,7 +261,37 @@ def _extensions(T, S):
             description='Momentum Percentile (compared to the rest of this Portfolio)',
             documentation='',
         ),
-    ]
+        Field(
+            name='sharpe',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'ticker',
+                ),
+                chain=(
+                    lambda data: models.sharpe(ticker=data['ticker']),
+                )
+            ),
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='Sharpe Ratio',
+            documentation='https://www.investopedia.com/terms/s/sharperatio.asp',
+        ),
+        Field(
+            name='treynor',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'ticker', 'beta'
+                ),
+                chain=(
+                    lambda data: models.treynor(data['ticker'], data['beta']),
+                )
+            ),
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='Treynor Ratio',
+            documentation='https://www.investopedia.com/terms/t/treynorratio.asp',
+        ),
+     ]
 
 def _extend(S, field):
     figet = field.getter

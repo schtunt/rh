@@ -66,7 +66,7 @@ class Lot:
             costbasis[lc.term]['qty'] += lc.quantity(when=when)
             costbasis[lc.term]['value'] += lc.costbasis(when=when)
 
-        # util.output.ddump(costbasis, force=True)
+        # util.debug.ddump(costbasis, force=True)
 
         return costbasis
 
