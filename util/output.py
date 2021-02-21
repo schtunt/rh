@@ -12,6 +12,7 @@ from pygments.formatters import Terminal256Formatter
 
 from beautifultable import BeautifulTable
 
+import fields
 import constants
 from constants import ZERO as Z
 
@@ -78,7 +79,6 @@ def prtable(table):
 def mktable(
     df,
     columns,
-    formats,
     maxwidth=320,
     tickers=(),
     filter_by=None,
@@ -86,16 +86,13 @@ def mktable(
     reverse=False,
     limit=0
 ):
-    # 1. filter columns
-    df = df[columns]
-
-    # 2. sort dataframe
+    # 1. sort dataframe
     df = df.sort_values(by=list(sort_by))
 
-    # 3. limit (or butterfly-limit (-limit)) dataframe
+    # 2. limit (or butterfly-limit (-limit)) dataframe
     l = len(df)
     if l > limit > 0:
-        df = df.tal(limit) if not reverse else df.head(limit)
+        df = df.tail(limit) if not reverse else df.head(limit)
     elif limit < 0:
         # butterfly-limit (remove from center point out to the wings/extremes)
         halflimit = -limit
@@ -105,34 +102,38 @@ def mktable(
                 df.tail(halflimit),
             ], axis=0)
 
-    # 4. create table
+    # 3. create table
     table = BeautifulTable(maxwidth=maxwidth)
 
-    # 5. configure table
+    # 4. configure table
     table.set_style(BeautifulTable.STYLE_GRID)
     table.columns.header = columns
     if 'activate' in columns:
         table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
 
-    # 6. populate table
-    for ticker, datum in df.iterrows():
-        table.rows.append(datum)
+    # 5. populate table
+    for index, dfrow in df.iterrows():
+        table.rows.append(dfrow[columns])
 
-    # 7. filter table rows
+    # 6. filter table rows
     if filter_by is not None:
         table = table.rows.filter(filter_by)
     if len(tickers) > 0:
         table = table.rows.filter(lambda row: row['ticker'] in tickers)
 
-    # 8. format table cells
+    # 7. format table cells
+    formatters = fields.formatters()
     for index, column in enumerate(columns):
-        rows, fn = table.columns[index], formats.get(column, None)
-        if fn is not None:
-            try:
-                casted_rows = list(map(fn, rows))
-                table.columns[index] = casted_rows
-            except:
-                print("Failed to cast values in column %s" % column, list(rows))
-                raise
+        # rows here represents all rows of a single column
+        rows, fn = table.columns[index], formatters[column]
+        if fn is None:
+            continue
+
+        try:
+            casted_rows = list(map(fn, rows))
+            table.columns[index] = casted_rows
+        except:
+            print("Failed to cast values in column %s" % column, list(rows))
+            raise
 
     return table

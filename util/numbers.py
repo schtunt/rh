@@ -1,11 +1,13 @@
 import math, decimal
 import numpy as np
+import pandas as pd
 import scipy as sp
 
 dec = lambda n: decimal.Decimal(str(n) if n is not None else 'NaN')
 rnd = lambda a, r: round(a / r) * r
 sgn = lambda n: -1 if n <= 0 else 1
-nan = decimal.Decimal('NaN')
+NaN = decimal.Decimal('NaN')
+NaT = pd.NaT
 
 def D(*args):
     if len(args) == 0: return dec(0)

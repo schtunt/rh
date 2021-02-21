@@ -11,8 +11,8 @@ import constants
 from constants import ZERO as Z
 
 import api
-import account
 import fields
+import account
 
 import util
 from util.numbers import D
@@ -102,48 +102,6 @@ VIEWS = [
     },
 ]
 
-FORMATERS = {
-    'bucket': lambda b: util.color.colored('$%dk' % b, 'blue'),
-    'since_open': util.color.mpct,
-    'since_close': util.color.mpct,
-    'CC.Coll': util.color.qty0,                   # Covered Call Collateral
-    'CSP.Coll': util.color.mulla,                 # Cash-Secured Put Collateral
-    'price': util.color.mulla,
-    'pcp': util.color.mulla,                      # Previous Close Price (PCP)
-    'change': util.color.pct,                     # Change since PCP
-    'esp': util.color.mulla,                      # Effective Share Price
-    'quantity': util.color.qty0,
-    'average_buy_price': util.color.mulla,
-    'equity': util.color.mulla,
-    'percent_change': util.color.pct,
-    'equity_change': util.color.mulla,
-    'pe_ratio': util.color.qty,
-    'pb_ratio': util.color.qty,
-    'percentage': util.color.pct,
-    'delta': util.color.qty,
-    'short': util.color.qty1,
-    'premium_collected': util.color.mulla,
-    'dividends_collected': util.color.mulla,
-    'ma': util.color.qty,
-    'cuq': util.color.qty,
-    'cuv': util.color.mulla,
-    'crq': util.color.qty,
-    'crv': util.color.mulla,
-    'cusq': util.color.qty,
-    'cusv': util.color.mulla,
-    'culq': util.color.qty,
-    'culv': util.color.mulla,
-    'crsq': util.color.qty,
-    'crsv': util.color.mulla,
-    'crlq': util.color.qty,
-    'crlv': util.color.mulla,
-    'analyst': util.color.qty,
-    'news': util.color.qty,
-    'next_expiry': util.datetime.ttl,
-    'urgency': util.color.mpctr,
-}
-FORMATERS.update(fields.formaters())
-
 FILTERS = {
     None: lambda d: d,
     'active': lambda d: len(d['activities']),
@@ -154,12 +112,12 @@ FILTERS = {
 
 _VIEWS = {}
 for cfg in VIEWS:
-    fields = cfg['fields']
+    columns = cfg['fields']
     for view in cfg['configurations']:
         _VIEWS[view['title']] = dict(
             sort_by=view.get('sort_by', ['ticker']),
             filter_by=FILTERS[view.get('filter_by', None)],
-            fields=fields,
+            columns=columns,
         )
 
 @cli.command(help='Views')
@@ -174,14 +132,13 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     tickers = [t.upper() for t in tickers]
     acc = account.Account(tickers)
 
-    columns = _VIEWS[view]['fields']
+    columns = _VIEWS[view]['columns']
     sort_by = _VIEWS[view]['sort_by'] if len(sort_by) == 0 else sort_by
     filter_by = _VIEWS[view]['filter_by']
 
     table = util.output.mktable(
         acc.stocks,
         columns,
-        FORMATERS,
         tickers=tickers,
         filter_by=filter_by,
         sort_by=sort_by,

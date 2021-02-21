@@ -25,6 +25,7 @@ import rh
 import api
 import util
 import slurp
+import fields
 import account
 from util.numbers import D
 
@@ -71,12 +72,6 @@ def module_mock_initialize(module_mocker):
     }))
 
     rh.preinitialize()
-
-
-@pytest.fixture(scope='module', params=['AAPL'])
-def stock(module_mocker, request):
-    ticker = request.param
-    return account.Account().get_stock(ticker)
 
 
 prices = [
@@ -159,6 +154,9 @@ def test_stock(iex_price_agg, iex_price, rh_get_latest_price, now, index, price,
     iex_price.return_value = price
     iex_price_agg.return_value = {'AAPL': price}
     rh_get_latest_price.return_value = [price]
+
+    _PULLCAST = fields._PULLCAST.items()
+    _PUSHCAST = fields._PUSHCAST.items()
 
     now.return_value = index2date(index)
     assert util.datetime.now() == index2date(index)

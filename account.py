@@ -4,7 +4,6 @@ import slurp
 
 import pandas as pd
 import scipy.stats
-import statistics
 
 import util
 from util.numbers import D
@@ -30,60 +29,6 @@ class Account:
             Account.PORTFOLIO,
             portfolio_is_complete=portfolio_is_complete,
         )
-        #self._stocks.reset_index(inplace=True)
-        #self._stocks.set_index('ticker', inplace=True)
-
-        T = self._transactions
-        S = self._stocks
-
-        # Embelishments -={
-        slurp.embelish(
-            obj=S,
-            attributes=('d200ma', 'd50ma', 'price',),
-            column='ma',
-            chain=(
-                lambda data: data.values(),
-                lambda data: util.numbers.growth_score(data),
-            ),
-        )
-
-        slurp.embelish(
-            obj=S,
-            attributes=('ticker',),
-            column='trd0',
-            chain=(
-                lambda data: T[T['symbol'] == data['ticker']].date,
-                lambda dates: min(dates) if len(dates) else pd.NaT,
-            )
-        )
-
-        slurp.embelish(
-            obj=S,
-            attributes=('price', 'pcp'),
-            column='change',
-            chain=(
-                lambda data: 100 * (data['price'] / data['pcp'] - 1),
-            )
-        )
-
-        slurp.embelish(
-            obj=S,
-            attributes=('ticker', 'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp'),
-            column='momentum',
-            chain=(
-                lambda data: { data.pop('ticker'): data },
-                lambda data: [
-                    scipy.stats.percentileofscore(
-                        pd.to_numeric(S[period]),
-                        pd.to_numeric(percentile),
-                    ) for ticker, percentiles in data.items()
-                    for period, percentile in percentiles.items()
-                ],
-                statistics.mean,
-            )
-        )
-
-        # }=-
 
     def get_stock(self, ticker):
         return Account.PORTFOLIO[ticker]
