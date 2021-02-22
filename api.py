@@ -42,9 +42,11 @@ import constants
 import robin_stocks as rh
 import iexfinance.stocks as iex
 import yahoo_earnings_calendar as yec
-import polygon
-import finnhub
-import monkeylearn
+import finnhub as fh
+from alpha_vantage.fundamentaldata import FundamentalData
+from alpha_vantage.sectorperformance import SectorPerformances
+from alpha_vantage.techindicators import TechIndicators
+from alpha_vantage.timeseries import TimeSeries
 
 
 
@@ -92,24 +94,21 @@ def connect():
     os.environ['IEX_OUTPUT_FORMAT'] = 'json'
 
     finnhub_api_key = secrets['finnhub_api_key']
-    CONNECTIONS['fh'] = finnhub.Client(
+    CONNECTIONS['fh'] = fh.Client(
         api_key=finnhub_api_key
     ) if finnhub_api_key else None
-
-    monkeylearn_api_key = secrets['monkeylearn_api_key']
-    CONNECTIONS['ml'] = monkeylearn.MonkeyLearn(
-        monkeylearn_api_key
-    ) if monkeylearn_api_key else None
 
     CONNECTIONS['yec'] = yec.YahooEarningsCalendar()
     # use datetime.fromtimestamp() for ^^'s results
 
     alpha_vantage_api_key = secrets['alpha_vantage_api_key']
+    os.environ['ALPHAVANTAGE_API_KEY'] = alpha_vantage_api_key
     #ts = TimeSeries(key='YOUR_API_KEY', output_format='pandas')
     #data, meta_data = ts.get_intraday(symbol='MSFT',interval='1min', outputsize='full')
 
-    polygon_api_key = secrets['polygon_api_key']
-
+    CONNECTIONS['av'] = dict(
+        fd=FundamentalData()
+    )
 
 @measure
 def connected(fn):
@@ -126,6 +125,34 @@ news_blob_hash = lambda *args, **kwargs: hashlib.sha1('|'.join(args[0][0]).encod
 def sentiments(blob):
     response = CONNECTIONS['ml'].classifiers.classify('cl_pi3C7JiL', blob)
     return response.body
+# }=-
+# AlphaVantage -={
+# 'Symbol', 'AssetType', 'Name', 'Description', 'Exchange', 'Currency', 'Country', 'Sector',
+# 'Industry', 'Address', 'FullTimeEmployees', 'FiscalYearEnd', 'LatestQuarter',
+# 'MarketCapitalization', 'EBITDA', 'PERatio', 'PEGRatio', 'BookValue', 'DividendPerShare',
+# 'DividendYield', 'EPS', 'RevenuePerShareTTM', 'ProfitMargin', 'OperatingMarginTTM',
+# 'ReturnOnAssetsTTM', 'ReturnOnEquityTTM', 'RevenueTTM', 'GrossProfitTTM', 'DilutedEPSTTM',
+# 'QuarterlyEarningsGrowthYOY', 'QuarterlyRevenueGrowthYOY', 'AnalystTargetPrice', 'TrailingPE',
+# 'ForwardPE', 'PriceToSalesRatioTTM', 'PriceToBookRatio', 'EVToRevenue', 'EVToEBITDA', 'Beta',
+# '52WeekHigh', '52WeekLow', '50DayMovingAverage', '200DayMovingAverage', 'SharesOutstanding',
+# 'SharesFloat', 'SharesShort', 'SharesShortPriorMonth', 'ShortRatio', 'ShortPercentOutstanding',
+# 'ShortPercentFloat', 'PercentInsiders', 'PercentInstitutions', 'ForwardAnnualDividendRate',
+# 'ForwardAnnualDividendYield', 'PayoutRatio', 'DividendDate', 'ExDividendDate',
+# 'LastSplitFactor', 'LastSplitDate'
+
+@cachier.cachier(stale_after=datetime.timedelta(days=7))
+def _overview(ticker):
+    return CONNECTIONS['av']['fd'].get_company_overview(ticker)[0]
+
+def sector(ticker):
+    return _overview(ticker)['Sector']
+
+def industry(ticker):
+    return _overview(ticker)['Industry']
+
+def ebitda(ticker):
+    return _overview(ticker)['EBITDA']
+
 # }=-
 # Finnhub -={
 @cachier.cachier(stale_after=datetime.timedelta(hours=2))
