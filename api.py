@@ -127,6 +127,7 @@ def sentiments(blob):
     return response.body
 # }=-
 # AlphaVantage -={
+# fd.get_company_overview
 # 'Symbol', 'AssetType', 'Name', 'Description', 'Exchange', 'Currency', 'Country', 'Sector',
 # 'Industry', 'Address', 'FullTimeEmployees', 'FiscalYearEnd', 'LatestQuarter',
 # 'MarketCapitalization', 'EBITDA', 'PERatio', 'PEGRatio', 'BookValue', 'DividendPerShare',
@@ -140,7 +141,7 @@ def sentiments(blob):
 # 'ForwardAnnualDividendYield', 'PayoutRatio', 'DividendDate', 'ExDividendDate',
 # 'LastSplitFactor', 'LastSplitDate'
 
-@cachier.cachier(stale_after=datetime.timedelta(days=7))
+@cachier.cachier(stale_after=datetime.timedelta(days=30))
 def _overview(ticker):
     return CONNECTIONS['av']['fd'].get_company_overview(ticker)[0]
 
@@ -151,7 +152,44 @@ def industry(ticker):
     return _overview(ticker)['Industry']
 
 def ebitda(ticker):
-    return _overview(ticker)['EBITDA']
+    return D(_overview(ticker)['EBITDA'])
+
+def ev(ticker):
+    '''
+    Enterprise Value
+
+    To calculate enterprise value, add the company's market capitalization to its outstanding
+    preferred stock and all debt obligations, then subtract all of its cash and cash equivalents.
+    '''
+    data = _overview(ticker)
+
+    #ev = D(data['MarketCapitalization'])
+    #ev += D(data['SharesOutstanding']) * price(ticker)
+    #ev... ...or...
+
+    return D(data['EBITDA']) * D(data['EVToEBITDA'])
+
+# fd.get_balance_sheet_annual
+# 'fiscalDateEnding', 'reportedCurrency', 'totalAssets',
+# 'intangibleAssets', 'earningAssets', 'otherCurrentAssets',
+# 'totalLiabilities', 'totalShareholderEquity',
+# 'deferredLongTermLiabilities', 'otherCurrentLiabilities', 'commonStock',
+# 'retainedEarnings', 'otherLiabilities', 'goodwill', 'otherAssets',
+# 'cash', 'totalCurrentLiabilities', 'shortTermDebt',
+# 'currentLongTermDebt', 'otherShareholderEquity',
+# 'propertyPlantEquipment', 'totalCurrentAssets', 'longTermInvestments',
+# 'netTangibleAssets', 'shortTermInvestments', 'netReceivables',
+# 'longTermDebt', 'inventory', 'accountsPayable', 'totalPermanentEquity',
+# 'additionalPaidInCapital', 'commonStockTotalEquity',
+# 'preferredStockTotalEquity', 'retainedEarningsTotalEquity',
+# 'treasuryStock', 'accumulatedAmortization', 'otherNonCurrrentAssets',
+# 'deferredLongTermAssetCharges', 'totalNonCurrentAssets',
+# 'capitalLeaseObligations', 'totalLongTermDebt',
+# 'otherNonCurrentLiabilities', 'totalNonCurrentLiabilities',
+# 'negativeGoodwill', 'warrants', 'preferredStockRedeemable',
+# 'capitalSurplus', 'liabilitiesAndShareholderEquity',
+# 'cashAndShortTermInvestments', 'accumulatedDepreciation',
+# 'commonStockSharesOutstanding'
 
 # }=-
 # Finnhub -={

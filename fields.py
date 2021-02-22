@@ -94,6 +94,14 @@ _apidictplucker = lambda getter, key: lambda ticker: getter(ticker)[key]
 
 def _extensions(T, S):
     return [
+#       Field(
+#           name='ev',
+#           getter=api.ev,
+#           pullcast=str,
+#           pushcast=util.color.mulla,
+#           description='Enterprise Value',
+#           documentation='https://www.investopedia.com/ask/answers/111414/whats-difference-between-enterprise-value-and-market-capitalization.asp',
+#       ),
         Field(
             name='shoutstanding',
             getter=api.shares_outstanding,
