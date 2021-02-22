@@ -43,8 +43,8 @@ VIEWS = [
         ],
         'fields': [
             'ticker',
-            'marketcap', 'beta',
-            'sharpe', 'treynor',
+            'marketcap', 'shoutstanding',
+            'beta', 'sharpe', 'treynor',
             'ma', 'd200ma', 'd50ma',
             'pcp', 'price',
             'esp',

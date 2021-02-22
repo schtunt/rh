@@ -276,7 +276,6 @@ def _iex_aggregator(fn_name, ticker=None):
         else:
             for chunk in util.chunk(symbols(), 100):
                 fn = getattr(iex.Stock(chunk), fn_name)
-
                 retrieved = fn()
                 if type(retrieved) is list:
                     data = defaultdict(list)

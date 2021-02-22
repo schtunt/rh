@@ -1,6 +1,6 @@
 import os
 
-import pandas_datareader as pddr
+import pandas_datareader as pdr
 import pandas as pd
 
 import datetime
@@ -173,7 +173,7 @@ def stock_historic_prices(ticker, years=7):
     tm7y = tNow - 7 * util.datetime.timedelta(days=365)
     yesteryear = util.datetime.short(tm7y)
 
-    df = pddr.data.DataReader(ticker, data_source='yahoo', start=tm7y, end=tNow)
+    df = pdr.data.DataReader(ticker, data_source='yahoo', start=tm7y, end=tNow)
     df.to_parquet(feather)
 
     return df
