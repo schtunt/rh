@@ -40,11 +40,12 @@ def mulla(m):
     # locale.currency(m, grouping=True)
     m = D(m)
     if not m.is_nan():
-        if m < 1000:
-            s = '${:,.2f}'.format(m)
+        if abs(m) < 1000:
+            s = '{:,.2f}'.format(abs(m))
         else:
-            s = '${:,}'.format(round(m))
+            s = '{:,}'.format(abs(round(m)))
         c = 'red' if m < 0 else 'green' if m > 0 else 'yellow'
+        s = ('+$%s' if m > 0 else '-$%s') % s
         return colored(s, c)
     else:
         return colored(m, 'red')

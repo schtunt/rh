@@ -59,6 +59,13 @@ def module_mock_initialize(module_mocker):
         return_value=['AAPL']
     ))
 
+    module_mocker.patch.object(api, 'connect', unittest.mock.MagicMock())
+
+    module_mocker.patch.object(api, 'FundamentalData', unittest.mock.MagicMock(**{
+        'return_value.%s.return_value' % fn: response
+            for fn, response in tests.fixtures.FIXTURES['av']['fd'].items()
+    }))
+
     module_mocker.patch.object(api, 'rh', unittest.mock.MagicMock(**{
         '%s.return_value' % fn: response
             for fn, response in tests.fixtures.FIXTURES['rh'].items()

@@ -1,7 +1,5 @@
 import util
-from util.numbers import D
-
-from constants import ZERO as Z
+from util.numbers import D, Z
 
 class Event:
     ident = 0
@@ -43,9 +41,7 @@ class TransactionEvent(Event):
             self.side = 'buy'
             self._quantity = fulfillment_buy
             self._price = Z
-            self.timestamp = util.datetime.datetime(
-                2020, 1, 1, 0, 0, tzinfo=util.datetime.timezone.utc
-            )
+            self.timestamp = util.datetime.parse('2020-01-01')
             self.otype = 'free'
 
 

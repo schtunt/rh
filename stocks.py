@@ -2,8 +2,7 @@ from collections import defaultdict
 from functools import reduce
 
 import util
-from util.numbers import D
-from constants import ZERO as Z
+from util.numbers import D, Z
 
 import cachier
 import datetime

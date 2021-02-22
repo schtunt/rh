@@ -17,12 +17,12 @@ class Account:
         self._transactions = slurp.transactions()
 
         portfolio_is_complete = bool(len(tickers) == 0)
+        if portfolio_is_complete:
+            tickers = tuple(api.symbols())
 
         Account.PORTFOLIO.update({
             ticker: stocks.Stock(self, ticker)
-            for ticker in (
-                api.symbols() if portfolio_is_complete else tickers
-            ) if not api.is_black(ticker)
+            for ticker in filter(api.is_white, tickers)
         })
 
         self._stocks = slurp.stocks(

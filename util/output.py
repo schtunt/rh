@@ -8,8 +8,7 @@ from . import debug
 from beautifultable import BeautifulTable
 
 import fields
-import constants
-from constants import ZERO as Z
+from util.numbers import D, Z
 
 class progress:
     def __init__(self, data, title=None, force=True):
@@ -51,12 +50,12 @@ def mktable(
     limit=0
 ):
     # 1. sort dataframe
-    df = df.sort_values(by=list(sort_by))
+    df = df.sort_values(by=list(sort_by), ascending=not reverse)
 
     # 2. limit (or butterfly-limit (-limit)) dataframe
     l = len(df)
     if l > limit > 0:
-        df = df.tail(limit) if not reverse else df.head(limit)
+        df = df.head(limit)
     elif limit < 0:
         # butterfly-limit (remove from center point out to the wings/extremes)
         halflimit = -limit

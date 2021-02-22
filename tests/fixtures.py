@@ -4,6 +4,7 @@ rh.constants.CACHE_DIR='/tmp/'
 FIXTURES = {
     'iex': {
         'get_beta': '1.00000',
+        'get_shares_outstanding': {'AAPL':1000000000000},
         'get_market_cap': 2295940008960,
         'get_splits': [{
             'date': 1598832000000,
@@ -56,7 +57,16 @@ FIXTURES = {
             'AAPL': {
                 'symbol': 'AAPL',
                 'previousClose': 130.84,
+                'changePercent': '0.12345',
             }
+        }
+    },
+    'av': {
+        'fd': {
+            'ev': 0,
+            'sector': 'N/A',
+            'industry': 'N/A',
+            'ebitda': 0,
         }
     },
     'rh': {

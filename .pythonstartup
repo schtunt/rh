@@ -17,10 +17,7 @@ import models
 import account
 import constants
 
-from constants import ZERO as Z
-from util.color import strip as S
-from util.numbers import D
-DS = lambda s: D(S(s))
+from util.numbers import D, Z
 
 def relmod():
     importlib.reload(rh)
@@ -37,3 +34,10 @@ def relmod():
 
 rh.preinitialize()
 rh.repl()
+
+datatypes = lambda df=rh.acc._stocks: {
+    column: set(map(type, df[column])) for column in df.columns
+}
+
+S = rh.acc._stocks
+T = rh.acc._transactions

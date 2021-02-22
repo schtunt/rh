@@ -1,21 +1,20 @@
 import os
+import datetime
 
 import pandas_datareader as pdr
 import pandas as pd
 
-import datetime
 from collections import defaultdict
 
-import api
+from progress.bar import ShadyBar
+
 import constants
+import api
 import util
 import events
 import fields
-from progress.bar import ShadyBar
 
-from util.numbers import D
-from util.color import strip as S
-from constants import ZERO as Z
+from util.numbers import D, Z
 
 FEATHER_BASE='/tmp'
 def feathers():
@@ -55,6 +54,29 @@ def update(column, data):
     return True
 
 
+def stock_historic_prices(ticker, years=7):
+    '''
+    Historic Stock Prices
+
+    '''
+    feather = featherfile('stocks', ticker)
+    if os.path.exists(feather):
+        df = pd.read_parquet(feather)
+        return df
+
+    tNow = util.datetime.now()
+    today = util.datetime.short(tNow)
+
+    # Start 7 years from today
+    tm7y = tNow - 7 * util.datetime.timedelta(days=365)
+    yesteryear = util.datetime.short(tm7y)
+
+    df = pdr.data.DataReader(ticker, data_source='yahoo', start=tm7y, end=tNow)
+    df.to_parquet(feather)
+
+    return df
+
+
 def transactions():
     '''
     DataFrame Update 1 - Stock information pulled from Robinhood CSV
@@ -67,9 +89,10 @@ def transactions():
         return df
 
     symbols = api.symbols()
-    with ShadyBar('%32s' % 'Building Transactions', max=len(symbols)+4) as bar:
+    with ShadyBar('%48s' % 'Building Transactions', max=len(symbols)+4) as bar:
         # 1. Download Stock Transactions from Robinhood...
-        imported = api.download('stocks')
+        ignore_cache = not os.path.exists('%s/.cached/stocks.csv' % constants.CACHE_DIR)
+        imported = api.download('stocks', ignore_cache=ignore_cache)
         bar.next()
 
         # 2. Import Stock Transaction data to Pandas DataFrame
@@ -119,7 +142,7 @@ def _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(df, port
 
     DataFrame Update 3 - Ledger Data
     '''
-    with ShadyBar('%32s' % 'Building Dependency Graph', max=len(df)) as bar:
+    with ShadyBar('%48s' % 'Building Dependency Graph', max=len(df)) as bar:
         for i, dfrow in df.iterrows():
             # The DataFrame was created from transactions (export downloaded from Robinhood.
             # That means it will contain some symbols no longer in service, which we call
@@ -156,51 +179,11 @@ def _stock_orders():
 
     return stocks,
 
-def stock_historic_prices(ticker, years=7):
-    '''
-    Historic Stock Prices
-
-    '''
-    feather = featherfile('stocks', ticker)
-    if os.path.exists(feather):
-        df = pd.read_parquet(feather)
-        return df
-
-    tNow = util.datetime.now()
-    today = util.datetime.short(tNow)
-
-    # Start 7 years from today
-    tm7y = tNow - 7 * util.datetime.timedelta(days=365)
-    yesteryear = util.datetime.short(tm7y)
-
-    df = pdr.data.DataReader(ticker, data_source='yahoo', start=tm7y, end=tNow)
-    df.to_parquet(feather)
-
-    return df
-
-def stocks(transactions, portfolio, portfolio_is_complete):
-    '''
-    DataFrame Update 4 - Addtional columns added here from Stock Object calls or other APIs
-    '''
-
-    feather = featherfile('stocks')
-    cache_exists = os.path.exists(feather)
-    if not (portfolio_is_complete and cache_exists):
-        # The `write' flag implies that the portfolio dataset is not partial (only contains
-        # select tickers).  If a cache file does not exists already, that means this is the
-        # time to create it.  For that to happen, the expensive linking process needs to take
-        # place here.
-        _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(
-            transactions,
-            portfolio
-        )
-    elif cache_exists:
-        df = pd.read_parquet(feather)
-        return df
-
+def _pull_processed_holdings_data(portfolio):
     now = util.datetime.now()
+    data = []
 
-    with ShadyBar('%32s' % 'Building Stocks', max=len(portfolio)+9) as bar:
+    with ShadyBar('%48s' % 'Refreshing Robinhood Portfolio Data', max=len(portfolio)+7) as bar:
         # 1. Pull holdings
         holdings = api.holdings()
         bar.next()
@@ -214,19 +197,19 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         bar.next()
 
         # 4. Pull Option Positions
-        data = _option_positions(prices)
-        collaterals = data['collaterals']
-        next_expiries = data['next_expiries']
-        urgencies = data['urgencies']
-        opened = data['opened']
-        del data
+        _data = _option_positions(prices)
+        collaterals = _data['collaterals']
+        next_expiries = _data['next_expiries']
+        urgencies = _data['urgencies']
+        opened = _data['opened']
+        del _data
         bar.next()
 
         # 5. Pull Options Orders
-        data = _option_orders()
-        premiums = data['premiums']
-        closed = data['closed']
-        del data
+        _data = _option_orders()
+        premiums = _data['premiums']
+        closed = _data['closed']
+        del _data
         bar.next()
 
         # 6. Pull Stock Orders (blob)
@@ -238,10 +221,11 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         bar.next()
 
         # -. Add all rows to Python list first
-        data = []
+        _timers = {}
         for ticker, stock in portfolio.items():
+            bar.next()
+
             if ticker not in holdings:
-                bar.next()
                 continue
 
             holding = holdings[ticker]
@@ -283,6 +267,7 @@ def stocks(transactions, portfolio, portfolio_is_complete):
             ttl = util.datetime.delta(now, next_expiry).days if next_expiry else -1
             fundamentals = api.fundamentals(ticker)
             quote = api.quote(ticker)
+
             row = dict(
                 ticker=ticker,
                 price=prices[ticker],
@@ -320,28 +305,63 @@ def stocks(transactions, portfolio, portfolio_is_complete):
                 next_expiry=next_expiry,
             )
             data.append(row)
-            bar.next()
 
-        # 8. Fields Extensions
-        flds = fields.Fields(data, transactions)
-        df = flds.extended
+    return data
+
+
+def stocks(transactions, portfolio, portfolio_is_complete):
+    '''
+    DataFrame Update 4 - Addtional columns added here from Stock Object calls or other APIs
+    '''
+
+    feather = featherfile('stocks')
+    cache_exists = os.path.exists(feather)
+
+    if not (portfolio_is_complete and cache_exists):
+        _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(
+            transactions,
+            portfolio
+        )
+
+    df = None
+    if cache_exists:
+        df = pd.read_parquet(feather)
+        if portfolio_is_complete:
+            return df
+
+    data = _pull_processed_holdings_data(portfolio)
+
+    # 8. Field Extensions
+    with ShadyBar('%48s' % 'Refreshing Extended DataFrame and Cache', max=2) as bar:
+        util.debug.mstart('FieldExtensions')
+        # NOTE: This will modify df (if it's not None) in-place.  If that ever changes, the
+        # following commented-out logic must be used:
+        #    df.set_index('ticker', inplace=True)
+        #    df.update(flds.extended.set_index('ticker'))
+        #    df.reset_index(inplace=True)
+        flds = fields.Fields(data, transactions, df=df)
+        if df is None:
+            df = flds.extended
+
+        util.debug.mstop('FieldExtensions')
         bar.next()
 
-        # 9. Dump to file, conditionally, fully or partially
-        if not cache_exists and portfolio_is_complete and 'test' not in feather:
-            df.to_parquet(feather)
-        elif not portfolio_is_complete and cache_exists:
-            # Update the main Feather DataFrame (on-disk) with the partial data we just
-            # retrieved.
-            dfm = pd.read_parquet(feather)
-            columns = list(dfm.columns)
-            dfm.set_index(keys=columns, inplace=True)
-            dfm.update(df.set_index(columns))
-            dfm.reset_index(inplace=True)
-            dfm.to_parquet(feather)
+        if 'test' not in feather:
+            assert len(df) == 70
+            # Emergency Sanitization
+            #for column in df.columns:
+            #    df[column] = df[column].map(lambda n: D(n) if type(n) in (str, float, int) else n)
+            try:
+                df.to_parquet(feather)
+            except:
+                print("Amended DataFrame can't be dumped")
+                util.debug.ddump({
+                    column:str(set(map(type, df[column]))) for column in df.columns
+                }, force=True)
+                raise
         bar.next()
 
-        return df
+    return df
 
 
 def _option_positions(prices):

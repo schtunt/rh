@@ -5,32 +5,30 @@ import datetime
 
 from functools import reduce
 from collections import defaultdict
-from collections import namedtuple
 from collections import OrderedDict
+import dataclasses
+import typing
 
 import api
 import util
 import models
-from util.numbers import NaT
-from util.numbers import D
+from util.numbers import NaN, D, Z
+from util.datetime import NaT
 
-FieldComplexConstructor = namedtuple(
-    'FieldComplexConstructor', [
-        'attributes',
-        'chain',
-    ]
-)
 
-Field = namedtuple(
-    'DataField', [
-        'name',
-        'getter',
-        'pullcast',
-        'pushcast',
-        'description',
-        'documentation',
-    ]
-)
+@dataclasses.dataclass
+class FieldComplexConstructor:
+    attributes: list[str]
+    chain:      list[typing.Callable]
+
+@dataclasses.dataclass
+class Field:
+    name: typing.AnyStr             # Field name
+    getter: FieldComplexConstructor # Getter function, or otherwise, a FieldComplexConstructor
+    pullcast:  typing.Callable      # How to typecast the pulled data at inress
+    pushcast: typing.Callable       # How to format the output data at presentation
+    description: str                # Description of the field/column
+    documentation: str              # URL to Investopedia describing the field
 
 # Field Pullcast (Data Type / Typecasting) -={
 _PULLCAST = dict(
@@ -40,9 +38,9 @@ _PULLCAST = dict(
     type=str, name=str,
     cnt=D, trd=D, qty=D, esp=D,
     crsq=D, crsv=D, crlq=D, crlv=D, cusq=D, cusv=D, culq=D, culv=D,
-    premium_collected=D, dividends_collected=D, pe_ratio2=D, pb_ratio=D,
+    pe_ratio2=D, pb_ratio=D,
     collateral_call=D, collateral_put=D,
-    next_expiry=datetime.datetime,
+    next_expiry=util.datetime.datetime,
     ttl=D, urgency=D, activities=str,
 )
 # }=-
@@ -65,8 +63,6 @@ _PUSHCAST = {
     'percentage': util.color.pct,
     'delta': util.color.qty,
     'short': util.color.qty1,
-    'premium_collected': util.color.mulla,
-    'dividends_collected': util.color.mulla,
     'cuq': util.color.qty,
     'cuv': util.color.mulla,
     'crq': util.color.qty,
@@ -94,14 +90,14 @@ _apidictplucker = lambda getter, key: lambda ticker: getter(ticker)[key]
 
 def _extensions(T, S):
     return [
-#       Field(
-#           name='ev',
-#           getter=api.ev,
-#           pullcast=str,
-#           pushcast=util.color.mulla,
-#           description='Enterprise Value',
-#           documentation='https://www.investopedia.com/ask/answers/111414/whats-difference-between-enterprise-value-and-market-capitalization.asp',
-#       ),
+        Field(
+            name='ev',
+            getter=api.ev,
+            pullcast=D,
+            pushcast=util.color.mulla,
+            description='Enterprise Value',
+            documentation='https://www.investopedia.com/ask/answers/111414/whats-difference-between-enterprise-value-and-market-capitalization.asp',
+        ),
         Field(
             name='shoutstanding',
             getter=api.shares_outstanding,
@@ -125,6 +121,22 @@ def _extensions(T, S):
             pushcast=util.color.qty,
             description='Beta',
             documentation='https://www.investopedia.com/terms/b/beta.asp',
+        ),
+        Field(
+            name='premium_collected',
+            getter=None,
+            pullcast=D,
+            pushcast=util.color.mulla,
+            description='Options Premium Collected',
+            documentation='',
+        ),
+        Field(
+            name='dividends_collected',
+            getter=None,
+            pullcast=D,
+            pushcast=util.color.mulla,
+            description='Stock Dividends Collected',
+            documentation='',
         ),
         Field(
             name='d50ma',
@@ -241,7 +253,7 @@ def _extensions(T, S):
                     lambda dates: min(dates) if len(dates) else NaT,
                 )
             ),
-            pullcast=D,
+            pullcast=util.datetime.datetime,
             pushcast=lambda d: util.color.qty0(util.datetime.age(d)),
             description='Day-Zero Trade',
             documentation='',
@@ -302,61 +314,105 @@ def _extensions(T, S):
         ),
      ]
 
-def _extend(S, field):
-    figet = field.getter
-    cast = field.pullcast
-    if type(figet) is not FieldComplexConstructor:
-        S[field.name] = [
-            cast(figet(ticker)) for ticker in S['ticker']
-        ]
-    else:
-        S[field.name] = pd.Series([
-            reduce(
-                lambda g, f: f(g),
-                figet.chain,
-                OrderedDict(zip(figet.attributes, components)),
-            ) for components in zip(
-                *map(
-                    lambda attr: getattr(S, attr),
-                    figet.attributes
-                )
-            )
-        ], index=S.index)
 # }=-
 
 def formatters():
-    _formatters = list(_PUSHCAST.items())
-    _formatters.extend((field.name, field.pushcast) for field in _extensions(None, None))
-    return defaultdict(lambda: None, _formatters)
+    '''The formatters control how the data is displayed at presentation time'''
+
+    formatters = dict(_PUSHCAST.items())
+    formatters.update(
+        {field.name: field.pushcast for field in _extensions(None, None)}
+    )
+    return defaultdict(lambda: str, formatters)
+
+def _typecasters():
+    '''
+    The typecasters control how the data is imported.  This includes only the
+    base fields.  The old style of defining base fields was through _PULLCAST.
+    The new style is via Field objects that have their getters set to None.
+    '''
+
+    typecasters = dict(_PULLCAST.items())
+    typecasters.update(
+        {
+            field.name: field.pullcast for field in _extensions(None, None)
+                if field.getter is None
+        }
+    )
+    return defaultdict(lambda: str, typecasters)
+
+def _extend(S, field, prioritize_missing):
+    figet = field.getter
+    cast = field.pullcast
+    try:
+        if figet is None:
+            S[field.name] = S[field.name].apply(cast)
+        elif type(figet) is not FieldComplexConstructor:
+            S[field.name] = list(
+                cast(figet(ticker)) for ticker in S['ticker'] if any((
+                    prioritize_missing and S[field.name] in (NaN, NaT, 'N/A'),
+                    not prioritize_missing # i.e., no priority at all, do all tickers
+                ))
+            )
+        else:
+            S[field.name] = pd.Series(list(
+                reduce(
+                    lambda g, f: f(g),
+                    figet.chain + (field.pullcast,),
+                    OrderedDict(zip(figet.attributes, components)),
+                ) for components in zip(
+                    *map(
+                        lambda attr: getattr(S, attr),
+                        figet.attributes
+                    )
+                )
+            ), index=S.index)
+    except:
+        raise RuntimeError("Failed to extend field `%s'" % field.name)
+
 
 class Fields:
-    @property
-    def extended(self):
-        return self._S
+    def __init__(self, data, T, df=None):
+        # Some APIs (free ones) will limit requests.  To make this useable, if the user has
+        # requested only a handful of tickers in their query, then to to hit the API unlit
+        # throttled.  Otherwise, prioritize missing ticker data over old ticker data, to avoid
+        # refreshing the same tickers over and over again.  This does not apply for the field
+        # type `FieldComplexConstructor', since those should not be making direct API calls,
+        # but create new fields using existing ones.
+        tickers_requested = len(data)
+        prioritize_missing = tickers_requested > 5
 
-    def __init__(self, data, T):
-        # The header for the rows represented in `data', keyed by column header, and the
-        # value representing the data type of that column.
-        global _PULLCAST
-        self._header = _PULLCAST
 
-        # The formatters control how the data is displayed at presentation time
-        global _PUSHCAST
-        self._formatters = _PUSHCAST
-
-        # Create the new `Stocks' DataFrame here for the first time, using the passed in python
-        # list of dicts, each representing a new row.  This is the starting point.
+        # Create new DataFrame first.  This DataFrame will be limited to the list
+        # of tickers supplied by the user, if any, otherwise as inclusive as the
+        # stored all-stock DataFrame.
+        typecasts = _typecasters()
         S = pd.DataFrame(
-            map(lambda row: map(lambda key: row[key], self._header), data),
-            columns=self._header
+            map(
+                lambda row: map(
+                    lambda typecast: typecast[1](row[typecast[0]]),
+                    typecasts.items()
+                ), data
+            ),
+            columns=typecasts.keys()
         )
 
         # Extend fields/columns
         for field in _extensions(T, S):
-            _extend(S, field)
+            _extend(S, field, prioritize_missing)
 
         # Sort the DataFrame by Ticker
-        S = S.sort_values(by='ticker')
+        S.sort_values(by='ticker', inplace=True)
 
-        # Assign & Delete Excess
-        self._S = S
+        if df is not None:
+            df.set_index('ticker', inplace=True)
+            df.update(S.set_index('ticker'))
+            df.reset_index(inplace=True)
+            self._S = df
+        else:
+            self._S = S
+
+
+    @property
+    def extended(self):
+        return self._S

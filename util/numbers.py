@@ -3,20 +3,20 @@ import numpy as np
 import pandas as pd
 import scipy as sp
 
-dec = lambda n: decimal.Decimal(str(n) if n is not None else 'NaN')
-rnd = lambda a, r: round(a / r) * r
-sgn = lambda n: -1 if n <= 0 else 1
-NaN = decimal.Decimal('NaN')
-NaT = pd.NaT
+Z = decimal.Decimal('0')
 
+NaN = decimal.Decimal('NaN')
+dec = lambda n: decimal.Decimal(str(n)) if n is not None else NaN
 def D(*args):
-    if len(args) == 0: return dec(0)
+    if len(args) == 0: return Z
     try: return dec(args[0])
-    except: raise RuntimeError("Failed to convert `%s' to a decimal" % args[0])
+    except: return NaN
 
 std = lambda n: dec(np.std(n))
 mean = lambda n: dec(np.mean(n))
 ident = lambda n: n
+rnd = lambda a, r: round(a / r) * r
+sgn = lambda n: -1 if n <= 0 else 1
 
 # Maps [-100/x .. +100/x] to [0 .. 100]
 scale_and_shift = lambda p, x: (p*x+1)/2

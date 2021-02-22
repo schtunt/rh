@@ -8,30 +8,20 @@ import colored_traceback.auto
 import pandas as pd
 
 import constants
-from constants import ZERO as Z
 
 import api
 import fields
 import account
 
 import util
-from util.numbers import D
-from util.color import strip as S
-DS = lambda s: D(S(s))
+from util.numbers import D, Z
 
 @click.group()
 @click.option('-D', '--debug', is_flag=True, default=False)
-@click.option('-C', '--clear-cache', is_flag=True, default=False)
 @click.pass_context
-def cli(ctx, debug, clear_cache):
+def cli(ctx, debug):
     ctx.ensure_object(dict)
     ctx.obj['debug'] = debug
-
-    if clear_cache:
-        from slurp import feathers
-        for fn in feathers():
-            if os.path.exists(fn):
-                os.unlink(fn)
 
 
 CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
@@ -43,7 +33,8 @@ VIEWS = [
         ],
         'fields': [
             'ticker',
-            'marketcap', 'shoutstanding',
+            'marketcap', 'ev',
+            'shoutstanding',
             'beta', 'sharpe', 'treynor',
             'ma', 'd200ma', 'd50ma',
             'pcp', 'price',
@@ -131,7 +122,8 @@ for cfg in VIEWS:
 @click.pass_context
 def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     debug = ctx.obj['debug']
-    tickers = [t.upper() for t in tickers]
+    tickers = [t.upper() for ts in tickers for t in ts.split(',')]
+
     acc = account.Account(tickers)
 
     columns = _VIEWS[view]['columns']
@@ -149,7 +141,7 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     )
     util.output.prtable(table)
 
-    api.measurements()
+    print(util.debug.measurements())
 
 
 @cli.command(help='Account History')
@@ -157,13 +149,14 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
 @click.pass_context
 def history(ctx, tickers):
     debug = ctx.obj['debug']
+    tickers = [t.upper() for ts in tickers for t in ts.split(',')]
     acc = account.Account(tickers)
 
     for ticker, stock in acc.portfolio:
         print(stock)
         stock.summarize()
 
-    api.measurements()
+    print(util.debug.measurements())
 
 
 acc = None
@@ -185,6 +178,8 @@ def repl():
     print()
     print(" + account.<ticker> (Local Stock object API multiplexor)")
     print(" + api.<ticker>     (IEXFinanceEndpoint Stock API object)")
+    print(" + S                (Stocks DataFrame)")
+    print(" + T                (Transactions DataFrame)")
     print()
     print("Meta-helpers for this REPL")
     print(" + relmod()         (reload wthout having to exit the repl)")
