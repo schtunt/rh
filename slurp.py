@@ -142,7 +142,7 @@ def _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(df, port
 
     DataFrame Update 3 - Ledger Data
     '''
-    with ShadyBar('%48s' % 'Building Dependency Graph', max=len(df)) as bar:
+    with ShadyBar('%48s' % 'Reading Robinhood Transactions History', max=len(df)) as bar:
         for i, dfrow in df.iterrows():
             # The DataFrame was created from transactions (export downloaded from Robinhood.
             # That means it will contain some symbols no longer in service, which we call
@@ -284,7 +284,7 @@ def _pull_processed_holdings_data(portfolio):
                 cnt=len(stock.events),
                 trd=stock.traded(),
                 qty=stock._quantity,
-                esp=stock.esp(),
+                cbps=stock.cbps(),
                 crsq=crsq,
                 crsv=crsv,
                 crlq=crlq,

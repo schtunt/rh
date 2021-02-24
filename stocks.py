@@ -53,7 +53,7 @@ class Stock:
             self.ticker,
             util.color.qty(self._quantity),
             util.color.mulla(self.price),
-            util.color.mulla(self.esp()),
+            util.color.mulla(self.cbps()),
         )
 
     @property
@@ -314,7 +314,7 @@ class Stock:
                 'trd':  self.traded(when=now),
                 'qty':  self._quantity,
                 'ptr':  self.pointer,
-                'esp':  self.esp(when=now), # Effective Share Price
+                'cbps': self.cbps(when=now),
                 'crsq': cbr['short']['qty'],
                 'crsv': cbr['short']['value'],
                 'crlq': cbr['long']['qty'],
@@ -335,7 +335,7 @@ class Stock:
             'trd':  self.traded(when=now),
             'qty':  self._quantity,
             'ptr':  self.pointer,
-            'esp':  self.esp(when=now),
+            'cbps': self.cbps(when=now),
             'crsq': cbr['short']['qty'],
             'crsv': cbr['short']['value'],
             'crlq': cbr['long']['qty'],
@@ -346,7 +346,7 @@ class Stock:
             'culv': cbu['long']['value'],
         }
 
-    def esp(self, when=None, dividends=False, premiums=False):
+    def cbps(self, when=None, dividends=False, premiums=False):
         '''
         On average, how much has each stock cost/made for the investor, per share ever traded,
         by that invester.  This number is calculated by taking into account everything that has
@@ -380,7 +380,7 @@ class Stock:
         #    ],
         #    'value': value,
         #    'qty': qty,
-        #    'esp': value / qty if qty > Z else Z
+        #    'cbps': value / qty if qty > Z else Z
         #}, force=True)
 
         return value / qty if qty > Z else Z

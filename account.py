@@ -11,23 +11,24 @@ from util.numbers import D
 
 
 class Account:
-    PORTFOLIO = {}
-
     def __init__(self, tickers=()):
+        self._portfolio = {}
+
         self._transactions = slurp.transactions()
 
-        portfolio_is_complete = bool(len(tickers) == 0)
-        if portfolio_is_complete:
+        portfolio_is_complete = False
+        if bool(len(tickers) == 0):
+            portfolio_is_complete = True
             tickers = tuple(api.symbols())
 
-        Account.PORTFOLIO.update({
+        self._portfolio.update({
             ticker: stocks.Stock(self, ticker)
             for ticker in filter(api.is_white, tickers)
         })
 
         self._stocks = slurp.stocks(
             self._transactions,
-            Account.PORTFOLIO,
+            self._portfolio,
             portfolio_is_complete=portfolio_is_complete,
         )
 
@@ -38,7 +39,7 @@ class Account:
         self._dividends_total = D(profile['dividend_total'])
 
     def get_stock(self, ticker):
-        return Account.PORTFOLIO[ticker]
+        return self._portfolio[ticker]
 
     def sharpe(self):
         data = models.sharpe(holdings=api.holdings())
@@ -70,7 +71,7 @@ class Account:
 
     @property
     def portfolio(self):
-        return Account.PORTFOLIO.items()
+        return self._portfolio.items()
 
 
 def __getattr__(ticker: str) -> stocks.Stock:
@@ -78,4 +79,4 @@ def __getattr__(ticker: str) -> stocks.Stock:
     if _ticker not in api.symbols():
         raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
 
-    return Account.PORTFOLIO[ticker.upper()]
+    return self._portfolio[ticker.upper()]

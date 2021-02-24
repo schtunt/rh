@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os, sys, locale
+import time
 import pathlib
 import click
 import colored_traceback.auto
@@ -39,7 +40,7 @@ VIEWS = [
             'quantity', 'equity', 'equity_change',                # Holdings
             'marketcap', 'ev', 'shoutstanding',                   # Company Info
             'pcp', 'price', 'percent_change', 'change',           # Price and Last Closing Price
-            'esp', 'premium_collected', 'dividends_collected',    # Share Performance in this PF
+            'cbps', 'premium_collected', 'dividends_collected',   # Share Performance in this PF
             'pe_ratio', 'pb_ratio', 'beta', 'sharpe', 'treynor',  # Ratios
             'momentum', 'ma', 'd200ma', 'd50ma',                  # Moving Avs & Score + Momentum
             'urgency', 'next_expiry', 'activities',               # Activity
@@ -78,6 +79,17 @@ for cfg in VIEWS:
             filter_by=FILTERS[view.get('filter_by', None)],
             columns=columns,
         )
+
+@cli.command(help='Refresh Data')
+@click.pass_context
+def refresh(ctx):
+    acc = account.Account()
+    batch_size = 5
+    for tickers in util.chunk(acc.stocks.ticker.to_list(), batch_size):
+        print("Processing next batch of %d (%s)..." % (batch_size, ','.join(tickers)))
+        _ = account.Account(tickers)
+        time.sleep(60)
+
 
 @cli.command(help='Views')
 @click.option('-t', '--tickers', multiple=True, default=None)

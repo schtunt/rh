@@ -136,7 +136,7 @@ AAPL,2020-01-01T19:58:29.368490Z,market,buy,0.00,100.00000000,100.00000000
 '''
 
 ANSWER_KEYS = [
-    'cnt', 'ptr', 'trd', 'qty', 'esp',
+    'cnt', 'ptr', 'trd', 'qty', 'cbps',
     'crsq', 'crsv', 'crlq', 'crlv', 'cusq', 'cusv', 'culq', 'culv'
 ]
 

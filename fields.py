@@ -37,7 +37,7 @@ _PULLCAST = dict(
     price=D, pcp=D, quantity=D, average_buy_price=D, equity=D, percent_change=D,
     equity_change=D, pe_ratio=D, percentage=D,
     type=str, name=str,
-    cnt=D, trd=D, qty=D, esp=D,
+    cnt=D, trd=D, qty=D, cbps=D,
     crsq=D, crsv=D, crlq=D, crlv=D, cusq=D, cusv=D, culq=D, culv=D,
     pe_ratio2=D, pb_ratio=D,
     collateral_call=D, collateral_put=D,
@@ -49,11 +49,11 @@ _PULLCAST = dict(
 _PUSHCAST = {
     #'since_open': util.color.mpct,
     #'since_close': util.color.mpct,
-    #'CC.Coll': util.color.qty0,                   # Covered Call Collateral
-    #'CSP.Coll': util.color.mulla,                 # Cash-Secured Put Collateral
+    #'CC.Coll': util.color.qty0,           # Covered Call Collateral
+    #'CSP.Coll': util.color.mulla,         # Cash-Secured Put Collateral
     'price': util.color.mulla,
-    'pcp': util.color.mulla,                      # Previous Close Price (PCP)
-    'esp': util.color.mulla,                      # Effective Share Price
+    'pcp': util.color.mulla,               # Previous Close Price (PCP)
+    'cbps': util.color.mulla,              # Cost-Basis Per Share (entire history accounted for)
     'quantity': util.color.qty0,
     'average_buy_price': util.color.mulla,
     'equity': util.color.mulla,
