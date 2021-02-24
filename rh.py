@@ -30,54 +30,19 @@ VIEWS = [
     {
         'configurations': [
             { 'title': 'all', 'sort_by': ['change'] },
-        ],
-        'fields': [
-            'ticker',
-            'marketcap', 'ev',
-            'shoutstanding',
-            'beta', 'sharpe', 'treynor',
-            'ma', 'd200ma', 'd50ma',
-            'pcp', 'price',
-            'esp',
-            'quantity',
-            'pe_ratio', 'pb_ratio',
-            'equity', 'equity_change',
-            'percent_change', 'change',
-            'premium_collected', 'dividends_collected',
-            'activities',
-            'trd0',
-            'momentum',
-        ],
-    },
-    {
-        'configurations': [
             { 'title': 'active', 'sort_by': ['urgency'], 'filter_by': 'next_expiry' },
-        ],
-        'fields': [
-            'ticker', 'percentage',
-            'quantity', 'price', 'esp',
-            'equity',
-            'equity_change', 'percent_change',
-            'premium_collected', 'dividends_collected',
-            'activities',
-            'next_expiry',
-            'urgency',
-        ],
-    },
-    {
-        'configurations': [
             { 'title': 'expiring', 'sort_by': ['urgency'], 'filter_by': 'soon_expiring' },
             { 'title': 'urgent', 'sort_by': ['next_expiry'], 'filter_by': 'urgent' },
         ],
         'fields': [
-            'ticker', 'percentage',
-            'quantity', 'price', 'esp',
-            'equity',
-            'equity_change', 'percent_change',
-            'premium_collected', 'dividends_collected',
-            'activities',
-            'next_expiry',
-            'urgency',
+            'ticker',
+            'quantity', 'equity', 'equity_change',                # Holdings
+            'marketcap', 'ev', 'shoutstanding',                   # Company Info
+            'pcp', 'price', 'percent_change', 'change',           # Price and Last Closing Price
+            'esp', 'premium_collected', 'dividends_collected',    # Share Performance in this PF
+            'pe_ratio', 'pb_ratio', 'beta', 'sharpe', 'treynor',  # Ratios
+            'momentum', 'ma', 'd200ma', 'd50ma',                  # Moving Avs & Score + Momentum
+            'urgency', 'next_expiry', 'activities',               # Activity
         ],
     },
     {
@@ -91,16 +56,17 @@ VIEWS = [
             'cusq', 'cusv', 'culq', 'culv',
             'crsq', 'crsv', 'crlq', 'crlv',
             'premium_collected', 'dividends_collected',
+            'trd0',
         ],
     },
 ]
 
 FILTERS = {
-    None: lambda d: d,
-    'active': lambda d: len(d['activities']),
-    'next_expiry': lambda d: d['next_expiry'] is not pd.NaT,
-    'soon_expiring': lambda d: d['next_expiry'] is not pd.NaT and util.datetime.ttl(d['next_expiry']) < 7,
-    'urgent': lambda d: d['urgency'] > 0.8,
+    None: lambda row: True,
+    'active': lambda row: len(row['activities']) > 0,
+    'next_expiry': lambda row: row['next_expiry'] is not pd.NaT,
+    'soon_expiring': lambda row: row['next_expiry'] is not pd.NaT and util.datetime.ttl(row['next_expiry']) < 14,
+    'urgent': lambda row: row['urgency'] > 0.8,
 }
 
 _VIEWS = {}
@@ -115,7 +81,7 @@ for cfg in VIEWS:
 
 @cli.command(help='Views')
 @click.option('-t', '--tickers', multiple=True, default=None)
-@click.option('-v', '--view', default='expiring', type=click.Choice(_VIEWS.keys()))
+@click.option('-v', '--view', default='all', type=click.Choice(_VIEWS.keys()))
 @click.option('-s', '--sort-by', multiple=True, default=[])
 @click.option('-r', '--reverse', default=False, is_flag=True, type=bool)
 @click.option('-l', '--limit', default=0, type=int)

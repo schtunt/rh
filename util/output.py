@@ -52,7 +52,14 @@ def mktable(
     # 1. sort dataframe
     df = df.sort_values(by=list(sort_by), ascending=not reverse)
 
-    # 2. limit (or butterfly-limit (-limit)) dataframe
+    # 2. filter dataframe (by row)
+    if len(tickers) > 0:
+        df = df[df.apply(lambda row: row['ticker'] in tickers, axis=1)]
+
+    if filter_by is not None:
+        df = df[df.apply(filter_by, axis=1)]
+
+    # 3. limit (or butterfly-limit (-limit)) dataframe
     l = len(df)
     if l > limit > 0:
         df = df.head(limit)
@@ -65,24 +72,18 @@ def mktable(
                 df.tail(halflimit),
             ], axis=0)
 
-    # 3. create table
+    # 4. create table
     table = BeautifulTable(maxwidth=maxwidth)
 
-    # 4. configure table
+    # 5. configure table
     table.set_style(BeautifulTable.STYLE_GRID)
     table.columns.header = columns
     if 'activate' in columns:
         table.columns.alignment['activities'] = BeautifulTable.ALIGN_LEFT
 
-    # 5. populate table
+    # 6. populate table
     for index, dfrow in df.iterrows():
         table.rows.append(dfrow[columns])
-
-    # 6. filter table rows
-    if filter_by is not None:
-        table = table.rows.filter(filter_by)
-    if len(tickers) > 0:
-        table = table.rows.filter(lambda row: row['ticker'] in tickers)
 
     # 7. format table cells
     formatters = fields.formatters()

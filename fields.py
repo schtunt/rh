@@ -1,3 +1,4 @@
+import sys
 import statistics
 import scipy.stats
 import pandas as pd
@@ -76,7 +77,7 @@ _PUSHCAST = {
     'crlq': util.color.qty,
     'crlv': util.color.mulla,
     'urgency': util.color.mpctr,
-    'next_expiry': util.datetime.ttl,
+    'next_expiry': lambda d: util.color.qty(util.datetime.ttl(d)),
 }
 #. }=-
 # Field Extensions -={
@@ -349,10 +350,13 @@ def _extend(S, field, prioritize_missing):
             S[field.name] = S[field.name].apply(cast)
         elif type(figet) is not FieldComplexConstructor:
             S[field.name] = list(
-                cast(figet(ticker)) for ticker in S['ticker'] if any((
-                    prioritize_missing and S[field.name] in (NaN, NaT, 'N/A'),
+                cast(figet(ticker)) for ticker in S['ticker'] if (
+                    field.name not in S.columns
+                ) or (
+                    prioritize_missing and S[field.name] in (NaN, NaT, 'N/A')
+                ) or (
                     not prioritize_missing # i.e., no priority at all, do all tickers
-                ))
+                )
             )
         else:
             S[field.name] = pd.Series(list(
@@ -367,8 +371,11 @@ def _extend(S, field, prioritize_missing):
                     )
                 )
             ), index=S.index)
-    except:
-        raise RuntimeError("Failed to extend field `%s'" % field.name)
+    except Exception as e:
+        ErrorClass = type(e)
+        message = "Failed to extend field `%s'" % field.name
+        exception = ErrorClass('%s; %s' % (str(e), message))
+        raise exception.with_traceback(sys.exc_info()[2])
 
 
 class Fields:

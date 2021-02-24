@@ -39,16 +39,33 @@ qty1 = lambda q: qty(q, 1)
 def mulla(m):
     # locale.currency(m, grouping=True)
     m = D(m)
-    if not m.is_nan():
-        if abs(m) < 1000:
-            s = '{:,.2f}'.format(abs(m))
-        else:
-            s = '{:,}'.format(abs(round(m)))
-        c = 'red' if m < 0 else 'green' if m > 0 else 'yellow'
-        s = ('+$%s' if m > 0 else '-$%s') % s
-        return colored(s, c)
-    else:
+    if m.is_nan():
         return colored(m, 'red')
+
+    if abs(m) < 1000:
+        s = '{:,.2f}'.format(abs(m))
+        c = 'red' if m < 0 else 'yellow'
+    elif abs(m) < 1000000:
+        s = '{:,}'.format(abs(round(m)))
+        c = 'red' if m < 0 else 'green' if m >= 10000 else 'yellow'
+    else:
+        compressors = [
+            ('K', 'yellow'),
+            ('M', 'green'),
+            ('B', 'blue'),
+            ('T', 'magenta'),
+        ]
+        i = -1
+        while abs(m) > 1000:
+            m //= 1000
+            i += 1
+        s = '{:,.2f}'.format(abs(round(m)))
+        if i > -1:
+            s += compressors[i][0]
+            c = compressors[i][1]
+
+    s = ('+$%s' if m > 0 else '-$%s') % s
+    return colored(s, c)
 
 
 RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
