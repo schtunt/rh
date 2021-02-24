@@ -37,7 +37,7 @@ _PULLCAST = dict(
     price=D, pcp=D, quantity=D, average_buy_price=D, equity=D, percent_change=D,
     equity_change=D, pe_ratio=D, percentage=D,
     type=str, name=str,
-    cnt=D, trd=D, qty=D, cbps=D,
+    cnt=D, trd=D, qty=D,
     crsq=D, crsv=D, crlq=D, crlv=D, cusq=D, cusv=D, culq=D, culv=D,
     pe_ratio2=D, pb_ratio=D,
     collateral_call=D, collateral_put=D,
@@ -53,7 +53,6 @@ _PUSHCAST = {
     #'CSP.Coll': util.color.mulla,         # Cash-Secured Put Collateral
     'price': util.color.mulla,
     'pcp': util.color.mulla,               # Previous Close Price (PCP)
-    'cbps': util.color.mulla,              # Cost-Basis Per Share (entire history accounted for)
     'quantity': util.color.qty0,
     'average_buy_price': util.color.mulla,
     'equity': util.color.mulla,
@@ -91,6 +90,22 @@ _apidictplucker = lambda getter, key: lambda ticker: getter(ticker)[key]
 
 def _extensions(T, S):
     return [
+        Field(
+            name='industry',
+            getter=api.industry,
+            pullcast=str,
+            pushcast=str,
+            description='Industry',
+            documentation='https://www.investopedia.com/terms/i/industry.asp',
+        ),
+        Field(
+            name='sector',
+            getter=api.sector,
+            pullcast=str,
+            pushcast=str,
+            description='Sector',
+            documentation='https://www.investopedia.com/terms/s/sector.asp',
+        ),
         Field(
             name='ev',
             getter=api.ev,
@@ -234,8 +249,8 @@ def _extensions(T, S):
                     'd200ma', 'd50ma', 'price',
                 ),
                 chain=(
-                    lambda data: data.values(),
-                    lambda data: util.numbers.growth_score(data),
+                    lambda R: R.values(),
+                    lambda R: util.numbers.growth_score(R),
                 ),
             ),
             pullcast=D,
@@ -244,13 +259,45 @@ def _extensions(T, S):
             documentation='',
         ),
         Field(
+            name='cbps',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'ticker',
+                ),
+                chain=(
+                    lambda R: T[T['symbol']==R['ticker']]['cbps'].values[-1],
+                )
+            ),
+            pullcast=D,
+            pushcast=util.color.mulla,
+            description='Cost-Basis per Share (Excluding Option Premiums and Dividends',
+            documentation='https://www.investopedia.com/terms/c/costbasis.asp',
+        ),
+        Field(
+            name='cbps%',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'ticker',
+                ),
+                chain=(
+                    lambda R: T[T['symbol']==R['ticker']]['cbps'].values[-1] / (
+                        S[S['ticker']==R['ticker']].price.item()
+                    ),
+                )
+            ),
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='Cost-Basis per Share (as a percentage of share price)',
+            documentation='https://www.investopedia.com/terms/c/costbasis.asp',
+        ),
+        Field(
             name='trd0',
             getter=FieldComplexConstructor(
                 attributes=(
                     'ticker',
                 ),
                 chain=(
-                    lambda data: T[T['symbol'] == data['ticker']].date,
+                    lambda R: T[T['symbol']==R['ticker']].date,
                     lambda dates: min(dates) if len(dates) else NaT,
                 )
             ),
@@ -267,12 +314,12 @@ def _extensions(T, S):
                     'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp',
                 ),
                 chain=(
-                    lambda data: { data.pop('ticker'): data },
-                    lambda data: [
+                    lambda R: { R.pop('ticker'): R },
+                    lambda R: [
                         scipy.stats.percentileofscore(
                             S[period].to_numpy(),
                             pd.to_numeric(percentile),
-                        ) for ticker, percentiles in data.items()
+                        ) for ticker, percentiles in R.items()
                         for period, percentile in percentiles.items()
                     ],
                     statistics.mean,
@@ -290,7 +337,7 @@ def _extensions(T, S):
                     'ticker',
                 ),
                 chain=(
-                    lambda data: models.sharpe(ticker=data['ticker']),
+                    lambda R: models.sharpe(ticker=R['ticker']),
                 )
             ),
             pullcast=D,
@@ -305,7 +352,7 @@ def _extensions(T, S):
                     'ticker', 'beta'
                 ),
                 chain=(
-                    lambda data: models.treynor(data['ticker'], data['beta']),
+                    lambda R: models.treynor(R['ticker'], R['beta']),
                 )
             ),
             pullcast=D,
@@ -349,15 +396,20 @@ def _extend(S, field, prioritize_missing):
         if figet is None:
             S[field.name] = S[field.name].apply(cast)
         elif type(figet) is not FieldComplexConstructor:
-            S[field.name] = list(
-                cast(figet(ticker)) for ticker in S['ticker'] if (
-                    field.name not in S.columns
-                ) or (
-                    prioritize_missing and S[field.name] in (NaN, NaT, 'N/A')
-                ) or (
-                    not prioritize_missing # i.e., no priority at all, do all tickers
-                )
-            )
+            # prioritize_missing implies user has not requested specific stocks, i.e., a
+            # targetted query (so fresh data is desired)
+            series = []
+            for ticker in S['ticker']:
+                if field.name not in S.columns:
+                    series.append(cast(figet(ticker)))
+                elif prioritize_missing and S[field.name] in (None, NaN, NaT, 'N/A'):
+                    series.append(cast(figet(ticker, ignore_cache=True)))
+                elif not prioritize_missing: # i.e., no priority at all, do all tickers
+                    series.append(cast(figet(ticker, ignore_cache=True)))
+                else:
+                    # TODO: Add age to everu row, this final block will refresh based on age
+                    pass
+            S[field.name] = series
         else:
             S[field.name] = pd.Series(list(
                 reduce(

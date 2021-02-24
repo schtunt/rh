@@ -42,7 +42,7 @@ def prtable(table):
 def mktable(
     df,
     columns,
-    maxwidth=320,
+    maxwidth=380,
     tickers=(),
     filter_by=None,
     sort_by=['ticker'],

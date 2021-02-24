@@ -89,7 +89,7 @@ def transactions():
         # 1. Download Stock Transactions from Robinhood...
         feather = featherfile('transactions')
         imported = '/tmp/.cached/stocks.csv'
-        if not (os.path.exists(feather) and os.path.exists(imported)):
+        if not os.path.exists(imported):
             # The `ignore_cache' flag here is eaten up by the cachier decorator
             imported = api.download('stocks', ignore_cache=True)
         bar.next()
@@ -152,8 +152,6 @@ def transactions():
                         existing[2] *= D(split['fromFactor'])
                         existing[2] /= D(split['toFactor'])
 
-            if row.symbol == 'EXPI' and len(data) and data[-1] == datum:
-                print("STOP! DUP!")
             data.append(datum)
             _,_,price,_ = datum
 
@@ -330,7 +328,6 @@ def _pull_processed_holdings_data(portfolio, T):
                 cnt=len(stock.events),
                 trd=stock.traded(),
                 qty=stock._quantity,
-                cbps=T[T['symbol']==ticker]['cbps'].values[-1],
                 crsq=crsq,
                 crsv=crsv,
                 crlq=crlq,
@@ -393,7 +390,6 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         bar.next()
 
         if 'test' not in feather:
-            assert len(df) == 70
             # Emergency Sanitization
             #for column in df.columns:
             #    df[column] = df[column].map(lambda n: D(n) if type(n) in (str, float, int) else n)

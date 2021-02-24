@@ -131,6 +131,11 @@ def sentiments(blob):
 _AV_STOP = False
 @cachier.cachier(stale_after=datetime.timedelta(seconds=300))
 def _overview(ticker):
+    '''
+    The free-tier of AV imposes a 500/day day-limit, and a 5/minute rate-limit.  Hence it will
+    not be rare to find this function returning `None'.  The wrappers need to handle this as a
+    non-exceptional event.
+    '''
     global _AV_STOP
 
     if _AV_STOP: return None
@@ -139,17 +144,19 @@ def _overview(ticker):
         return CONNECTIONS['av']['fd'].get_company_overview(ticker)[0]
     except:
         _AV_STOP = True
-        #print("Hit API-Stop for AV")
         return None
 
 def sector(ticker):
-    return _overview(ticker)['Sector']
+    overview = _overview(ticker)
+    return overview['Sector'] if overview is not None else 'N/A'
 
 def industry(ticker):
-    return _overview(ticker)['Industry']
+    overview = _overview(ticker)
+    return overview['Industry'] if overview is not None else 'N/A'
 
 def ebitda(ticker):
-    return D(_overview(ticker)['EBITDA'])
+    overview = _overview(ticker)
+    return overview['EBITDA'] if overview is not None else NaN
 
 def ev(ticker):
     '''
@@ -423,10 +430,10 @@ market_cap = lambda ticker: _market_cap_agg(ticker)
 marketcap = market_cap
 
 
-@cachier.cachier(stale_after=datetime.timedelta(days=28))
-@util.debug.measure
-def _sector_agg(ticker=None): return _iex_aggregator('get_sector', ticker)
-sector = lambda ticker: _sector_agg(ticker)
+#@cachier.cachier(stale_after=datetime.timedelta(days=90))
+#@util.debug.measure
+#def _sector_agg(ticker=None): return _iex_aggregator('get_sector', ticker)
+#sector = lambda ticker: _sector_agg(ticker)
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=1))

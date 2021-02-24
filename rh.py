@@ -36,11 +36,12 @@ VIEWS = [
             { 'title': 'urgent', 'sort_by': ['next_expiry'], 'filter_by': 'urgent' },
         ],
         'fields': [
-            'ticker',
+            'sector', 'industry', 'ticker',
             'quantity', 'equity', 'equity_change',                # Holdings
             'marketcap', 'ev', 'shoutstanding',                   # Company Info
             'pcp', 'price', 'percent_change', 'change',           # Price and Last Closing Price
-            'cbps', 'premium_collected', 'dividends_collected',   # Share Performance in this PF
+            'cbps', 'cbps%',                                      # Share Performance in this PF,
+            'premium_collected', 'dividends_collected',           # Share Performance in this PF
             'pe_ratio', 'pb_ratio', 'beta', 'sharpe', 'treynor',  # Ratios
             'momentum', 'ma', 'd200ma', 'd50ma',                  # Moving Avs & Score + Momentum
             'urgency', 'next_expiry', 'activities',               # Activity
@@ -85,9 +86,28 @@ for cfg in VIEWS:
 def refresh(ctx):
     acc = account.Account()
     batch_size = 5
+
+    view = 'all'
+    columns = _VIEWS[view]['columns']
+    sort_by = _VIEWS[view]['sort_by']
+    filter_by = _VIEWS[view]['filter_by']
+
     for tickers in util.chunk(acc.stocks.ticker.to_list(), batch_size):
         print("Processing next batch of %d (%s)..." % (batch_size, ','.join(tickers)))
-        _ = account.Account(tickers)
+        acc = account.Account(tickers)
+
+        table = util.output.mktable(
+            acc.stocks,
+            columns,
+            tickers=tickers,
+            filter_by=filter_by,
+            sort_by=sort_by,
+            reverse=False,
+            limit=0,
+        )
+        util.output.prtable(table)
+        print(util.debug.measurements())
+
         time.sleep(60)
 
 
@@ -118,8 +138,6 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
         limit=limit,
     )
     util.output.prtable(table)
-
-    print(util.debug.measurements())
 
 
 @cli.command(help='Account History')
