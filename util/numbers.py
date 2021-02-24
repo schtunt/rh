@@ -3,6 +3,9 @@ import numpy as np
 import pandas as pd
 import scipy as sp
 
+def preinitialize():
+    decimal.getcontext().prec = 20
+
 Z = decimal.Decimal('0')
 
 NaN = decimal.Decimal('NaN')

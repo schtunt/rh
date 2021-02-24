@@ -329,6 +329,7 @@ class Stock:
         now = util.datetime.now()
         cbr = self.costbasis(realized=True, when=now)
         cbu = self.costbasis(realized=False, when=now)
+
         return {
             'cnt':  len(self.events),
             'dts':  transaction.timestamp,

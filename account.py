@@ -38,8 +38,11 @@ class Account:
         self._cash = D(profile['cash'])
         self._dividends_total = D(profile['dividend_total'])
 
-    def get_stock(self, ticker):
+    def underlying(self, ticker):
         return self._portfolio[ticker]
+
+    def __getitem__(self, ticker):
+        return self.underlying(ticker)
 
     def sharpe(self):
         data = models.sharpe(holdings=api.holdings())
@@ -74,9 +77,9 @@ class Account:
         return self._portfolio.items()
 
 
-def __getattr__(ticker: str) -> stocks.Stock:
-    _ticker = ticker.upper()
-    if _ticker not in api.symbols():
-        raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
-
-    return self._portfolio[ticker.upper()]
+#def __getattr__(ticker: str) -> stocks.Stock:
+#    _ticker = ticker.upper()
+#    if _ticker not in api.symbols():
+#        raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
+#
+#    return self._portfolio[ticker.upper()]

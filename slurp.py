@@ -25,7 +25,7 @@ def feathers():
 def featherfile(base, ticker=None):
     featherbase = {
         'transactions': f'/{FEATHER_BASE}/transactions',
-        'stocks': f'/{FEATHER_BASE}/stocks',
+        'stocks': f'{FEATHER_BASE}/stocks',
     }[base]
 
     if ticker is None:
@@ -83,16 +83,15 @@ def transactions():
 
     DataFrame Update 2 - Options information pulled from Robinhood
     '''
-    feather = featherfile('transactions')
-    if os.path.exists(feather):
-        df = pd.read_parquet(feather)
-        return df
 
     symbols = api.symbols()
-    with ShadyBar('%48s' % 'Building Transactions', max=len(symbols)+4) as bar:
+    with ShadyBar('%48s' % 'Building Transactions', max=len(symbols)+6) as bar:
         # 1. Download Stock Transactions from Robinhood...
-        ignore_cache = not os.path.exists('%s/.cached/stocks.csv' % constants.CACHE_DIR)
-        imported = api.download('stocks', ignore_cache=ignore_cache)
+        feather = featherfile('transactions')
+        imported = '/tmp/.cached/stocks.csv'
+        if not (os.path.exists(feather) and os.path.exists(imported)):
+            # The `ignore_cache' flag here is eaten up by the cachier decorator
+            imported = api.download('stocks', ignore_cache=True)
         bar.next()
 
         # 2. Import Stock Transaction data to Pandas DataFrame
@@ -105,7 +104,7 @@ def transactions():
         ))
         bar.next()
 
-        # -. Update Stocks Transaction history with position-altering Options Contracts...
+        # 3. Update Stocks Transaction history with position-altering Options Contracts...
         #    (stocks bought/sold via the options market (assigments and excercises)
         for ticker in symbols:
             for se in api.events(ticker):
@@ -123,13 +122,60 @@ def transactions():
                     )
             bar.next()
 
-        # 3. Sort
-        df = df.sort_values(by='date')
+        # 4. Sort
+        df.sort_values(by='date', inplace=True)
         bar.next()
 
-        # 4. Dump
+        # 5. Reset the Index
+        df.reset_index(inplace=True, drop=True)
+        bar.next()
+
+        cbtally = defaultdict(list)
+        def _costbasis(row):
+            data = cbtally[row.symbol]
+
+            signum = {'buy':-1, 'sell':+1}[row.side]
+            datum = ['trade', D(signum) * D(row.quantity), D(row.average_price), row.date]
+
+            if len(data) > 0:
+                _,_,_,d0 = data[-1]
+                _,_,_,d2 = datum
+                splits = api.splits(row.symbol)
+                for split in splits:
+                    d1 = util.datetime.parse(split['exDate'])
+                    if not d0 < d1 < d2:
+                        continue
+
+                    for existing in data:
+                        existing[1] *= D(split['toFactor'])
+                        existing[1] /= D(split['fromFactor'])
+                        existing[2] *= D(split['fromFactor'])
+                        existing[2] /= D(split['toFactor'])
+
+            if row.symbol == 'EXPI' and len(data) and data[-1] == datum:
+                print("STOP! DUP!")
+            data.append(datum)
+            _,_,price,_ = datum
+
+            bought = -sum(qty for cls,qty,pps,date in data if qty < 0)
+            sold   = +sum(qty for cls,qty,pps,date in data if qty > 0)
+            held   = bought - sold
+
+            return pd.Series([
+                D(bought), D(sold), D(held), D(
+                    (
+                        sum(qty * pps for cls,qty,pps,date in data) + held * price
+                    )/bought
+                ) if bought > 0 else Z
+            ])
+
+        # 6. Cost Basis
+        df[['bought', 'sold', 'held', 'cbps']] = df.apply(_costbasis, axis=1)
+        bar.next()
+
+        # 7. Dump
         if 'test' not in feather:
-            df.to_parquet(feather)
+            df.to_parquet(feather, index=False)
         bar.next()
 
     return df
@@ -179,7 +225,7 @@ def _stock_orders():
 
     return stocks,
 
-def _pull_processed_holdings_data(portfolio):
+def _pull_processed_holdings_data(portfolio, T):
     now = util.datetime.now()
     data = []
 
@@ -284,7 +330,7 @@ def _pull_processed_holdings_data(portfolio):
                 cnt=len(stock.events),
                 trd=stock.traded(),
                 qty=stock._quantity,
-                cbps=stock.cbps(),
+                cbps=T[T['symbol']==ticker]['cbps'].values[-1],
                 crsq=crsq,
                 crsv=crsv,
                 crlq=crlq,
@@ -329,7 +375,7 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         if portfolio_is_complete:
             return df
 
-    data = _pull_processed_holdings_data(portfolio)
+    data = _pull_processed_holdings_data(portfolio, transactions)
 
     # 8. Field Extensions
     with ShadyBar('%48s' % 'Refreshing Extended DataFrame and Cache', max=2) as bar:
@@ -352,7 +398,7 @@ def stocks(transactions, portfolio, portfolio_is_complete):
             #for column in df.columns:
             #    df[column] = df[column].map(lambda n: D(n) if type(n) in (str, float, int) else n)
             try:
-                df.to_parquet(feather)
+                df.to_parquet(feather, index=False)
             except:
                 print("Amended DataFrame can't be dumped")
                 util.debug.ddump({

@@ -17,6 +17,7 @@ def risk_free_rate_of_return():
     '''
     return D(0.02)
 
+
 def treynor(ticker, beta):
     '''
     Treynor Ratio for a single stock

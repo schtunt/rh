@@ -1,3 +1,4 @@
+import decimal
 import constants
 
 chunk = lambda lst, n: (lst[i:i + n] for i in range(0, len(lst), n))

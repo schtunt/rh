@@ -181,7 +181,7 @@ def test_stock(
     if index > 7: return
     acc = account.Account(tickers=['AAPL'])
 
-    stock = acc.get_stock('AAPL')
+    stock = acc.underlying('AAPL')
     assert len(api.splits('AAPL')) == 1
     assert len(stock.splits) == 1
 
