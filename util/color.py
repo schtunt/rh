@@ -154,14 +154,16 @@ def _wtm(s_k_ratio, otype, itype):
 
     # how likely it is that this contract will not expire worthless, and that it will
     # be assigned if seller, and hold intrinsic value if buyer
+    impact = [ D(0.40), D(0.7), D(1), D(1.3), D(1.6) ]
     urgency = {
-        'put': D(1.0) / D(s_k_ratio),
-        'call': D(s_k_ratio),
+        'put': D(1) / D(s_k_ratio) * impact[len(thresholds) - index],
+        'call': D(s_k_ratio) * impact[index],
     }[itype]
     urgency = {
         'short': urgency,
-        'long': 1/urgency,
+        'long': D(1)/urgency,
     }[otype]
+
 
     c, attrs = dict(zip(keys, style))[themoney]
     return dict(
