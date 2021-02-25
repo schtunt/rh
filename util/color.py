@@ -7,6 +7,8 @@ import stringcolor as sc
 
 colhash = lambda s, h=None: sc.cs(s, f'rgb{ch.ColorHash(h if h else s).rgb}')
 colhashbold = lambda s, h=None: colhash(s, h).bold()
+colhashwrap = lambda s: '\n'.join(map(lambda t: colhash(t, s).render(), s.split()))
+
 
 from util.numbers import D
 
@@ -64,7 +66,7 @@ def mulla(m):
         while abs(m) > 1000:
             m //= 1000
             i += 1
-        s = '{:,.2f}'.format(abs(round(m)))
+        s = '{:,.1f}'.format(abs(round(m)))
         if i > -1:
             s += compressors[i][0]
             c = compressors[i][1]

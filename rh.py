@@ -17,6 +17,9 @@ import account
 import util
 from util.numbers import D, Z
 
+upper = lambda l: list(map(lambda s: s.upper(), l))
+csv_list_flatten = lambda csvl: [token for csv in csvl for token in csv.split(',')]
+
 @click.group()
 @click.option('-D', '--debug', is_flag=True, default=False)
 @click.pass_context
@@ -120,7 +123,8 @@ def refresh(ctx):
 @click.pass_context
 def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     debug = ctx.obj['debug']
-    tickers = [t.upper() for ts in tickers for t in ts.split(',')]
+    tickers = upper(csv_list_flatten(tickers))
+    sort_by = csv_list_flatten(sort_by)
 
     acc = account.Account(tickers)
 
@@ -139,13 +143,12 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     )
     util.output.prtable(table)
 
-
 @cli.command(help='Account History')
 @click.option('-t', '--tickers', multiple=True, required=True)
 @click.pass_context
 def history(ctx, tickers):
     debug = ctx.obj['debug']
-    tickers = [t.upper() for ts in tickers for t in ts.split(',')]
+    tickers = upper(csv_list_flatten(tickers))
     acc = account.Account(tickers)
 
     for ticker, stock in acc.portfolio:
