@@ -164,21 +164,6 @@ def industry(ticker):
     overview = _overview(ticker)
     return overview['Industry'] if overview is not None else 'N/A'
 
-def ebit(ticker):
-    '''
-    Earnings Before Interest and Taxes
-    Used to measure a firm's operating income.
-    '''
-    return
-
-def ebt(ticker):
-    '''
-    Earnings Before Taxes
-    While used for essentially the same purpose as EBIT, this represents a firm's operating
-    income after accounting for expenses outside of the firm's control.
-    '''
-    return
-
 # fd.get_balance_sheet_annual
 # 'fiscalDateEnding', 'reportedCurrency', 'totalAssets',
 # 'intangibleAssets', 'earningAssets', 'otherCurrentAssets',
@@ -327,6 +312,10 @@ def fundamentals(ticker):
     if ticker not in FUNDAMENTALS:
         FUNDAMENTALS[ticker] = rh.stocks.get_fundamentals(ticker)[0]
     return FUNDAMENTALS[ticker]
+
+def float(ticker):
+    return D(fundamentals(ticker)['float'])
+
 # }=-
 
 @cachier.cachier(stale_after=datetime.timedelta(days=14))
@@ -339,8 +328,16 @@ def events(ticker):
 # IEX Aggregation -={
 IEX_AGGREGATOR = defaultdict(dict)
 def _iex_aggregator(fn_name, ticker=None):
-    #util.debug.ddump(IEX_AGGREGATOR, force=True)
+    '''
+    If the in-memory cache dict IEX_AGGREGATOR is empty, fill it will all tickers via
+    batched requests.
 
+    Note this cache last as long as the process life, don't rely on this to save on API
+    bandwidth over mny runs of the program, rely on `cachier'.
+
+    After that, if a ticker is supplied, make sure the ticker is added to that cache if
+    not in there already.
+    '''
     agg = IEX_AGGREGATOR[fn_name]
     if len(agg) == 0:
         for chunk in util.chunk(symbols(), 100):
@@ -359,22 +356,44 @@ def _iex_aggregator(fn_name, ticker=None):
 
             agg.update(data)
 
-    if ticker is not None:
-        if ticker not in agg:
-            fn = getattr(iex.Stock(ticker), fn_name)
-            try:
-                datum = fn()
-                if datum:
-                    agg[ticker] = datum
-            except:
-                print("Error handling ticker `%s'" % ticker)
-                raise
+    if ticker is None:
+        if fn_name == 'get_financials':
+            # Yes, robin-stocks is returning this mess for financials, which we need to correct
+            return {
+                ticker: datum.get('financials', [None])[0]
+                for tticker, datum in data2.items()
+            }
         else:
-            datum = agg[ticker]
+            return {ticker: datum for ticker, datum in agg.items()}
 
+    if ticker not in agg:
+        fn = getattr(iex.Stock(ticker), fn_name)
+        try:
+            datum = fn()
+            if datum:
+                agg[ticker] = datum
+        except:
+            print("Error handling ticker `%s'" % ticker)
+            raise
+    else:
+        datum = agg[ticker]
+
+    if fn_name == 'get_financials':
+        # Yes, robin-stocks is returning this mess for financials, which we need to correct
+        return datum.get('financials', [None])[0]
+    else:
         return datum
 
-    return {ticker: datum for ticker, datum in agg.items()}
+
+@cachier.cachier(stale_after=datetime.timedelta(days=1))
+@util.debug.measure
+def _prices_last_year_agg():
+    when = util.datetime.short(util.datetime.lastyear())
+    prices = pdr.data.DataReader(
+        symbols, data_source='yahoo', start=when, end=when
+    )['Adj Close'].values[0]
+    return dict(zip(symbols(), map(D, prices)))
+_prices_last_year = lambda ticker: _prices_last_year_agg[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
@@ -401,7 +420,7 @@ _stats_advanced = lambda ticker: _stats_advanced_agg(ticker)
 #'week52highDate', 'week52lowDate', 'putCallRatio',
 #'week52high', 'week52low', 'week52highSplitAdjustOnly', 'week52highDateSplitAdjustOnly',
 #'week52lowSplitAdjustOnly', 'week52lowDateSplitAdjustOnly', 'week52change',
-#'float', 'avg10Volume', 'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees',
+#'avg10Volume', 'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees',
 #'ttmEPS', 'ttmDividendRate', 'dividendYield', 'nextDividendDate', 'exDividendDate',
 #'nextEarningsDate', 'peRatio', 'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent',
 #'year1ChangePercent', 'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent',
@@ -409,7 +428,7 @@ _stats_advanced = lambda ticker: _stats_advanced_agg(ticker)
 
 IEX_KEY_STATS={
     'companyName', 'marketcap', 'week52high', 'week52low', 'week52highSplitAdjustOnly',
-    'week52lowSplitAdjustOnly', 'week52change', 'sharesOutstanding', 'float', 'avg10Volume',
+    'week52lowSplitAdjustOnly', 'week52change', 'sharesOutstanding', 'avg10Volume',
     'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees', 'ttmEPS', 'ttmDividendRate',
     'dividendYield', 'nextDividendDate', 'exDividendDate', 'nextEarningsDate', 'peRatio', 'beta',
     'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent', 'year1ChangePercent',
@@ -439,6 +458,80 @@ def ebitda(ticker):
     '''
     key = 'EBITDA'
     return D(stat(ticker, key))
+
+def ebit(ticker):
+    '''
+    Earnings Before Interest and Taxes; also referred to as `operating earnings',
+    `operating profit', and `profit before interest and taxes'.
+
+    EBIT is used to measure a firm's operating income.
+
+    EBIT can be calculated as revenue minus expenses excluding tax and interest.
+    '''
+
+    key = 'ebit'
+    return D(financials(ticker)[key])
+
+def ebt(ticker):
+    '''
+    Earnings Before Taxes
+    While used for essentially the same purpose as EBIT, this represents a firm's operating
+    income after accounting for expenses outside of the firm's control.
+    '''
+    return
+
+def dividends_paid(ticker):
+    '''
+    This is dividends paid by the company, nothing to do with Robinhood profile and individual's
+    account.
+    '''
+    key = 'dividendsPaid'
+    d = financials(ticker)[key]
+    return Z if d is None else D(d)
+
+def income(ticker):
+    key = 'netIncome'
+    return D(financials(ticker)[key])
+
+def liabilities(ticker):
+    key = 'totalLiabilities'
+    return D(financials(ticker)[key])
+
+def debt(ticker):
+    key = 'totalDebt'
+    return D(financials(ticker)[key])
+
+def assets(ticker):
+    key = 'totalAssets'
+    return D(financials(ticker)[key])
+
+def cash(ticker):
+    key = 'totalCash'
+    return D(financials(ticker)[key])
+
+def equity(ticker):
+    key = 'shareholderEquity'
+    return D(financials(ticker)[key])
+
+def roc(ticker):
+    '''
+    Rate of Change
+    '''
+    p0 = _prices_last_year(ticker)
+    pNow = price(ticker)
+    return
+
+def roic(ticker):
+    '''
+    Return On Invested Capital
+
+    roic = (net income - dividend) / (debt + equity)
+    '''
+    return (
+        income(ticker) - dividends_paid(ticker)
+    ) / (
+        debt(ticker) + equity(ticker)
+    )
 
 def av(ticker, av):
     return D(stat(ticker, dict(
@@ -557,13 +650,19 @@ def _sector_agg(ticker=None): return _iex_aggregator('get_sector', ticker)
 sector = lambda ticker: _sector_agg(ticker)
 
 
+@cachier.cachier(stale_after=datetime.timedelta(weeks=4))
+@util.debug.measure
+def _financials_agg(ticker=None): return _iex_aggregator('get_financials', ticker)
+financials = lambda ticker: _financials_agg(ticker)
+
+
 @cachier.cachier(stale_after=datetime.timedelta(hours=12))
 @util.debug.measure
 def _quote_agg(ticker=None): return _iex_aggregator('get_quote', ticker)
 quote = lambda ticker: _quote_agg(ticker)
 
 
-@cachier.cachier(stale_after=datetime.timedelta(days=3))
+@cachier.cachier(stale_after=datetime.timedelta(days=7))
 @util.debug.measure
 def _earnings_agg(ticker=None): return _iex_aggregator('get_earnings', ticker)
 earnings = lambda ticker: _earnings_agg(ticker)
@@ -581,7 +680,7 @@ def _previous_day_prices_agg(ticker=None): return _iex_aggregator('get_previous_
 previous_day_prices = lambda ticker: _previous_day_prices_agg(ticker)
 
 
-@cachier.cachier(stale_after=datetime.timedelta(days=1))
+@cachier.cachier(stale_after=datetime.timedelta(days=4))
 @util.debug.measure
 def _insider_transactions_agg(ticker=None): return _iex_aggregator('get_insider_transactions', ticker)
 insider_transactions = lambda ticker: _insider_transactions_agg(ticker)

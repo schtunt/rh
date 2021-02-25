@@ -89,6 +89,38 @@ _PUSHCAST = {
 def _extensions(T, S):
     return [
         Field(
+            name='roic',
+            getter=api.roic,
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='ROIC',
+            documentation='https://www.investopedia.com/terms/r/returnoninvestmentcapital.asp',
+        ),
+        Field(
+            name='ebt',
+            getter=api.ebt,
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='EBT',
+            documentation='https://www.investopedia.com/terms/e/ebt.asp',
+        ),
+        Field(
+            name='ebit',
+            getter=api.ebit,
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='EBIT',
+            documentation='https://www.investopedia.com/terms/e/ebit.asp',
+        ),
+        Field(
+            name='ebitda',
+            getter=api.ebitda,
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='EBITDA',
+            documentation='https://www.investopedia.com/terms/e/ebitda.asp',
+        ),
+        Field(
             name='p2e',
             getter=lambda ticker: api.price(ticker, ratio='p2e'),
             pullcast=D,

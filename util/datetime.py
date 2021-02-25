@@ -17,6 +17,7 @@ short = lambda dt: pd.to_datetime(dt).strftime('%Y-%m-%d') if not pd.isna(dt) el
 delta = lambda fr, to=None: (now() if to is None else recast(to)) - recast(fr)
 age = lambda fr, to=now(): +delta(fr, to).days
 ttl = lambda fr, to=now(): -delta(fr, to).days
+lastyear = dt.datetime.now() - timedelta(days=365)
 
 NaT = pd.NaT
 def datetime(*args):
