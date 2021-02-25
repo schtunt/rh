@@ -2,6 +2,11 @@ import re
 import locale
 
 from termcolor import colored
+import colorhash as ch
+import stringcolor as sc
+
+colhash = lambda s, h=None: sc.cs(s, f'rgb{ch.ColorHash(h if h else s).rgb}')
+colhashbold = lambda s, h=None: colhash(s, h).bold()
 
 from util.numbers import D
 

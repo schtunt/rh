@@ -2,5 +2,10 @@
 
 source "$(dirname "${0}")/.venv/bin/activate"
 
-python rh.py "${@}"
+if [ "$1" == 'colors' ]; then
+    string-color
+else
+    python rh.py "${@}"
+fi
+
 exit $?

@@ -47,6 +47,7 @@ _PULLCAST = dict(
 # }=-
 # Field Pushcast (Data Presentation / Formating) -={
 _PUSHCAST = {
+    'ticker': lambda t: util.color.colhashbold(t, t[0]),
     #'since_open': util.color.mpct,
     #'since_close': util.color.mpct,
     #'CC.Coll': util.color.qty0,           # Covered Call Collateral
@@ -94,7 +95,7 @@ def _extensions(T, S):
             name='industry',
             getter=api.industry,
             pullcast=str,
-            pushcast=str,
+            pushcast=util.color.colhash,
             description='Industry',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
         ),
@@ -102,7 +103,7 @@ def _extensions(T, S):
             name='sector',
             getter=api.sector,
             pullcast=str,
-            pushcast=str,
+            pushcast=util.color.colhash,
             description='Sector',
             documentation='https://www.investopedia.com/terms/s/sector.asp',
         ),
