@@ -11,7 +11,6 @@ import api
 import lots
 import events
 
-
 class Stock:
     def __init__(self, account, ticker):
         self.account = account

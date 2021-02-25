@@ -1,7 +1,9 @@
 import os
 import sys
-import datetime
+import typing
 import pathlib
+import datetime
+import dataclasses
 
 from collections import defaultdict
 
@@ -19,6 +21,7 @@ import robin_stocks as rh
 import iexfinance.stocks as iex
 import yahoo_earnings_calendar as _yec
 import finnhub as _fh
+import yfinance as yf
 from alpha_vantage.fundamentaldata import FundamentalData
 from alpha_vantage.sectorperformance import SectorPerformances
 from alpha_vantage.techindicators import TechIndicators
@@ -57,6 +60,7 @@ IEX_STOCKS = {}
 
 
 CONNECTIONS = {}
+
 
 @util.debug.measure
 def connect():
@@ -460,14 +464,6 @@ def iex_stock(ticker):
     return stock
 
 
-def __getattr__(ticker: str) -> iex.Stock:
-    _ticker = ticker.upper()
-    if _ticker not in symbols():
-        raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
-
-    return iex_stock(ticker.upper())
-
-
 @cachier.cachier(stale_after=datetime.timedelta(hours=1))
 @util.debug.measure
 def news(ticker, source):
@@ -476,3 +472,20 @@ def news(ticker, source):
         'iex': lambda: iex_stock(ticker).get_news()
     }[source]()
 # }=-
+
+
+@dataclasses.dataclass
+class StockMultiplexor:
+    iex: iex.Stock
+    yf:  yf.Ticker
+
+
+def __getattr__(ticker: str) -> iex.Stock:
+    _ticker = ticker.upper()
+    if _ticker not in symbols():
+        raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
+
+    return StockMultiplexor(
+        iex=iex_stock(ticker),
+        yf=yf.Ticker(ticker),
+    )

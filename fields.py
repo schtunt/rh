@@ -4,11 +4,12 @@ import scipy.stats
 import pandas as pd
 import datetime
 
+import typing
+import dataclasses
+
 from functools import reduce
 from collections import defaultdict
 from collections import OrderedDict
-import dataclasses
-import typing
 
 import api
 import util
