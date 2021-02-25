@@ -22,6 +22,7 @@ import iexfinance.stocks as iex
 import yahoo_earnings_calendar as _yec
 import finnhub as _fh
 import yfinance as yf
+import tiingo as tii
 from alpha_vantage.fundamentaldata import FundamentalData
 from alpha_vantage.sectorperformance import SectorPerformances
 from alpha_vantage.techindicators import TechIndicators
@@ -99,6 +100,12 @@ def connect():
         fd=FundamentalData()
     )
     module.fd = CONNECTIONS['av']['fd']
+
+    CONNECTIONS['tii'] = tii.TiingoClient(dict(
+        session=True,
+        api_key=secrets['tiingo_api_key']
+    ))
+    module.tii = CONNECTIONS['tii']
 
 @util.debug.measure
 def connected(fn):
@@ -407,9 +414,11 @@ IEX_KEY_STATS={
 }
 def stat(ticker, stat=None):
     if stat in IEX_KEY_STATS:
-        return _stats_key_agg(ticker)[stat]
+        data = _stats_key_agg(ticker)
     else:
-        return _stats_advanced_agg(ticker)[stat]
+        data = _stats_advanced_agg(ticker)
+
+    return data if stat is None else data[stat]
 
 def stats(ticker, key=None, advanced=False):
     if not advanced:
@@ -514,6 +523,10 @@ def profit_margin(ticker):
 def price(ticker, ratio=None):
     if ratio is None:
         return _price_agg(ticker)
+    elif ratio == 'earnings2growth':
+        key = 'pegRatio'
+    elif ratio == 'earnings':
+        key = 'peRatio'
     elif ratio == 'sales':
         key = 'priceToSales'
     elif ratio == 'book':
