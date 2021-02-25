@@ -117,7 +117,7 @@ def _extensions(T, S):
             documentation='https://www.investopedia.com/ask/answers/111414/whats-difference-between-enterprise-value-and-market-capitalization.asp',
         ),
         Field(
-            name='shoutstanding',
+            name='so',
             getter=api.shares_outstanding,
             pullcast=D,
             pushcast=util.color.qty0,

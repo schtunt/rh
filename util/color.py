@@ -5,10 +5,13 @@ from termcolor import colored
 import colorhash as ch
 import stringcolor as sc
 
+from .numbers import D, NaN
+
 colhash = lambda s, h=None: sc.cs(s, f'rgb{ch.ColorHash(h if h else s).rgb}')
 colhashbold = lambda s, h=None: colhash(s, h).bold()
-colhashwrap = lambda s: '\n'.join(map(lambda t: colhash(t, s).render(), s.split()))
-
+colhashwrap = lambda s: '\n'.join(
+    map(lambda t: colhash(t, s).render(), s.replace('-', ' ').split(' '))
+)
 
 from util.numbers import D
 
@@ -30,24 +33,11 @@ spcr  = ['blue', 'cyan', 'green', 'yellow', 'red']
 pctr  = lambda p: colorize(lambda n: '%0.2f%%' % n, D(p), spcr, [D(0), D(50), D(65), D(80)])
 mpctr = lambda p: pctr(100*p)
 
-    # ${:,.2f}
 # Quantity
-qty  = lambda q, dp=2: colorize(
-    lambda n: ('{:,.%df}' % dp).format(n),
-    D(q),
-    ['yellow', 'cyan'],
-    [D(0)]
-)
-qty0 = lambda q: qty(q, 0)
-qty1 = lambda q: qty(q, 1)
-
-
-# Currency
-def mulla(m):
-    # locale.currency(m, grouping=True)
+def _qty(m):
     m = D(m)
     if m.is_nan():
-        return colored(m, 'red')
+        return NaN, None
 
     if abs(m) < 1000:
         s = '{:,.2f}'.format(abs(m))
@@ -70,9 +60,23 @@ def mulla(m):
         if i > -1:
             s += compressors[i][0]
             c = compressors[i][1]
+    return s, c
 
-    s = ('+$%s' if m > 0 else '-$%s') % s
-    return colored(s, c)
+qty  = lambda q, dp=2: colorize(
+    lambda n: ('{:,.%df}' % dp).format(n),
+    D(q),
+    ['yellow', 'cyan'],
+    [D(0)]
+)
+qty1 = lambda q: qty(q, 1)
+
+def qty0(q):
+    s, c = _qty(q)
+    return colored(s, 'red') if s is NaN else colored(s, c)
+
+def mulla(m):
+    s, c = _qty(m)
+    return colored(m, 'red') if s is NaN else colored(('+$%s' if m > 0 else '-$%s') % s, c)
 
 
 RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')

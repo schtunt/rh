@@ -41,7 +41,7 @@ VIEWS = [
         'fields': [
             'sector', 'industry', 'ticker',
             'quantity', 'equity', 'equity_change',                # Holdings
-            'marketcap', 'ev', 'shoutstanding',                   # Company Info
+            'marketcap', 'ev', 'so',                              # Company Info
             'pcp', 'price', 'percent_change', 'change',           # Price and Last Closing Price
             'cbps', 'cbps%',                                      # Share Performance in this PF,
             'premium_collected', 'dividends_collected',           # Share Performance in this PF
