@@ -461,21 +461,6 @@ def cp(ticker, cp):
     )[cp]))
 
 
-def ev(ticker, ratio=None):
-    '''
-    Enterprise Value
-
-    To calculate enterprise value, add the company's market capitalization to its outstanding
-    preferred stock and all debt obligations, then subtract all of its cash and cash equivalents.
-    '''
-
-    if ratio is None:
-        key = 'enterpriseValue'
-    elif ratio == 'revenue':
-        key = 'enterpriseValueToRevenue'
-
-    return D(stat(ticker, key))
-
 def beta(ticker):
     key = 'beta'
     return D(stat(ticker, key))
@@ -523,17 +508,44 @@ def profit_margin(ticker):
 def price(ticker, ratio=None):
     if ratio is None:
         return _price_agg(ticker)
-    elif ratio == 'earnings2growth':
+    elif ratio == 'peg':
         key = 'pegRatio'
-    elif ratio == 'earnings':
+    elif ratio == 'p2e':
         key = 'peRatio'
-    elif ratio == 'sales':
+    elif ratio == 'p2s':
         key = 'priceToSales'
-    elif ratio == 'book':
+    elif ratio == 'p2b':
         key = 'priceToBook'
 
     return D(stat(ticker, key))
 
+def ev(ticker, ratio=None):
+    '''
+    Enterprise Value
+
+    To calculate enterprise value, add the company's market capitalization to its outstanding
+    preferred stock and all debt obligations, then subtract all of its cash and cash equivalents.
+    '''
+
+    numerator = 'enterpriseValue'
+    denominator = None
+
+    if ratio == 'ev2r':
+        numerator = 'enterpriseValueToRevenue'
+    elif ratio == 'ev2gp':
+        numerator = 'enterpriseValue'
+        denominator = 'grossProfit'
+    elif ratio == 'ev2ebitda':
+        denominator = 'EBITDA'
+    elif ratio == 'ebit2ev':
+        denominator = numerator
+        numerator = 'EBIT'
+
+    return D(
+        stat(ticker, numerator)
+    ) / D(1) if denominator is None else D(
+        stat(ticker, denominator)
+    )
 
 @cachier.cachier(stale_after=datetime.timedelta(days=90))
 @util.debug.measure

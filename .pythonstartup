@@ -63,3 +63,5 @@ print(" + datatypes(df)          (Schema check on Pandas DataFrame (specifically
 datatypes = lambda df=S: {
     column: set(map(type, df[column])) for column in df.columns
 }
+
+nullrows = lambda df=S: S[S.isnull().any(axis=1)]

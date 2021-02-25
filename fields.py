@@ -36,11 +36,11 @@ class Field:
 _PULLCAST = dict(
     ticker=str,
     price=D, pcp=D, quantity=D, average_buy_price=D, equity=D, percent_change=D,
-    equity_change=D, pe_ratio=D, percentage=D,
+    equity_change=D, pe_ratio=D, pb_ratio=D,
+    percentage=D,
     type=str, name=str,
     cnt=D, trd=D, qty=D,
     crsq=D, crsv=D, crlq=D, crlv=D, cusq=D, cusv=D, culq=D, culv=D,
-    pe_ratio2=D, pb_ratio=D,
     collateral_call=D, collateral_put=D,
     next_expiry=util.datetime.datetime,
     ttl=D, urgency=D, activities=str,
