@@ -149,36 +149,28 @@ def _overview(ticker):
         _AV_STOP = True
         return None
 
-def sector(ticker):
-    overview = _overview(ticker)
-    return overview['Sector'] if overview is not None else 'N/A'
+#def sector(ticker):
+#    overview = _overview(ticker)
+#    return overview['Sector'] if overview is not None else 'N/A'
 
 def industry(ticker):
     overview = _overview(ticker)
     return overview['Industry'] if overview is not None else 'N/A'
 
-def ebitda(ticker):
-    overview = _overview(ticker)
-    return overview['EBITDA'] if overview is not None else NaN
-
-def ev(ticker):
+def ebit(ticker):
     '''
-    Enterprise Value
-
-    To calculate enterprise value, add the company's market capitalization to its outstanding
-    preferred stock and all debt obligations, then subtract all of its cash and cash equivalents.
+    Earnings Before Interest and Taxes
+    Used to measure a firm's operating income.
     '''
-    data = _overview(ticker)
+    return
 
-    #ev = D(data['MarketCapitalization'])
-    #ev += D(data['SharesOutstanding']) * price(ticker)
-    #ev... ...or...
-
-    try:
-        return D(data['EBITDA']) * D(data['EVToEBITDA']) if data else None
-    except KeyError:
-        util.debug.ddump(data)
-        return None
+def ebt(ticker):
+    '''
+    Earnings Before Taxes
+    While used for essentially the same purpose as EBIT, this represents a firm's operating
+    income after accounting for expenses outside of the firm's control.
+    '''
+    return
 
 # fd.get_balance_sheet_annual
 # 'fiscalDateEnding', 'reportedCurrency', 'totalAssets',
@@ -344,27 +336,21 @@ def _iex_aggregator(fn_name, ticker=None):
 
     agg = IEX_AGGREGATOR[fn_name]
     if len(agg) == 0:
-        if fn_name in ('get_market_cap', 'get_beta'):
-            # https://github.com/addisonlynch/iexfinance/issues/261
-            # https://github.com/addisonlynch/iexfinance/issues/260
-            print('Refusing to call API for %s' % fn_name)
-            pass
-        else:
-            for chunk in util.chunk(symbols(), 100):
-                fn = getattr(iex.Stock(chunk), fn_name)
-                retrieved = fn()
-                if type(retrieved) is list:
-                    data = defaultdict(list)
-                    for datum in retrieved:
-                        data[datum['symbol']].append(datum)
-                elif type(retrieved) is dict:
-                    data = {ticker: datum for ticker, datum in retrieved.items()}
-                else:
-                    raise RuntimeError(
-                        "Error: `%s' (retrieved) is neither dict nor list" % retrieved
-                    )
+        for chunk in util.chunk(symbols(), 100):
+            fn = getattr(iex.Stock(chunk), fn_name)
+            retrieved = fn()
+            if type(retrieved) is list:
+                data = defaultdict(list)
+                for datum in retrieved:
+                    data[datum['symbol']].append(datum)
+            elif type(retrieved) is dict:
+                data = {ticker: datum for ticker, datum in retrieved.items()}
+            else:
+                raise RuntimeError(
+                    "Error: `%s' (retrieved) is neither dict nor list" % retrieved
+                )
 
-                agg.update(data)
+            agg.update(data)
 
     if ticker is not None:
         if ticker not in agg:
@@ -386,26 +372,166 @@ def _iex_aggregator(fn_name, ticker=None):
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @util.debug.measure
-def _price_agg(ticker=None): return _iex_aggregator('get_price', ticker)
-price = lambda ticker: _price_agg(ticker)
+def _price_agg(ticker=None): return {
+    ticker: D(price) for ticker, price in _iex_aggregator('get_price', ticker).items()
+}
 
 
-@cachier.cachier(stale_after=datetime.timedelta(days=14))
+@cachier.cachier(stale_after=datetime.timedelta(days=1))
 @util.debug.measure
-def _beta_agg(ticker=None): return _iex_aggregator('get_beta', ticker)
-beta = lambda ticker: _beta_agg(ticker)
+def _stats_key_agg(ticker=None): return _iex_aggregator('get_key_stats', ticker)
+_stats_key = lambda ticker: _stats_key_agg(ticker)
+
+@cachier.cachier(stale_after=datetime.timedelta(days=7))
+@util.debug.measure
+def _stats_advanced_agg(ticker=None): return _iex_aggregator('get_advanced_stats', ticker)
+_stats_advanced = lambda ticker: _stats_advanced_agg(ticker)
+#'forwardPERatio', 'pegRatio', 'peHigh', 'peLow',
+#'week52highDate', 'week52lowDate', 'putCallRatio',
+#'week52high', 'week52low', 'week52highSplitAdjustOnly', 'week52highDateSplitAdjustOnly',
+#'week52lowSplitAdjustOnly', 'week52lowDateSplitAdjustOnly', 'week52change',
+#'float', 'avg10Volume', 'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees',
+#'ttmEPS', 'ttmDividendRate', 'dividendYield', 'nextDividendDate', 'exDividendDate',
+#'nextEarningsDate', 'peRatio', 'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent',
+#'year1ChangePercent', 'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent',
+#'month1ChangePercent', 'day30ChangePercent', 'day5ChangePercent'
+
+IEX_KEY_STATS={
+    'companyName', 'marketcap', 'week52high', 'week52low', 'week52highSplitAdjustOnly',
+    'week52lowSplitAdjustOnly', 'week52change', 'sharesOutstanding', 'float', 'avg10Volume',
+    'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees', 'ttmEPS', 'ttmDividendRate',
+    'dividendYield', 'nextDividendDate', 'exDividendDate', 'nextEarningsDate', 'peRatio', 'beta',
+    'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent', 'year1ChangePercent',
+    'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent', 'month1ChangePercent',
+    'day30ChangePercent', 'day5ChangePercent'
+}
+def stat(ticker, stat=None):
+    if stat in IEX_KEY_STATS:
+        return _stats_key_agg(ticker)[stat]
+    else:
+        return _stats_advanced_agg(ticker)[stat]
+
+def stats(ticker, key=None, advanced=False):
+    if not advanced:
+        data = _stats_advanced_agg(ticker)
+    else:
+        data = _stats_key_agg(ticker)
+
+    return data if stat is None else data[stat]
+
+def ebitda(ticker):
+    '''
+    Earnings Before Interest, Taxes, Depreciation and Amortization
+    Used to measure the cash flow of a business.
+    '''
+    key = 'EBITDA'
+    return D(stat(ticker, key))
+
+def av(ticker, av):
+    return D(stat(ticker, dict(
+        a10v='avg10Volume',
+        a30v='avg30Volume',
+    )[av]))
+
+def ma(ticker, ma):
+    return D(stat(ticker, dict(
+        d200ma='day200MovingAvg',
+        d50ma='day50MovingAvg',
+    )[ma]))
+
+def cp(ticker, cp):
+    return D(stat(ticker, dict(
+        y5cp='year5ChangePercent',
+        y2cp='year2ChangePercent',
+        y1cp='year1ChangePercent',
+        m6cp='month6ChangePercent',
+        m3cp='month3ChangePercent',
+        m1cp='month1ChangePercent',
+        d30cp='day30ChangePercent',
+        d5cp='day5ChangePercent',
+    )[cp]))
+
+
+def ev(ticker, ratio=None):
+    '''
+    Enterprise Value
+
+    To calculate enterprise value, add the company's market capitalization to its outstanding
+    preferred stock and all debt obligations, then subtract all of its cash and cash equivalents.
+    '''
+
+    if ratio is None:
+        key = 'enterpriseValue'
+    elif ratio == 'revenue':
+        key = 'enterpriseValueToRevenue'
+
+    return D(stat(ticker, key))
+
+def beta(ticker):
+    key = 'beta'
+    return D(stat(ticker, key))
+
+def shares_outstanding(ticker):
+    key = 'sharesOutstanding'
+    return D(stat(ticker, key))
+
+def cash(ticker, total=True):
+    if total:
+        key = 'totalCash'
+
+    return D(stat(ticker, key))
+
+def debt(ticker, ratio=None):
+    if ratio is None:
+        key = 'currentDebt'
+    else:
+        key = 'debtToEquity'
+
+    return D(stat(ticker, key))
+
+def revenue(ticker, total=False, per=None):
+    assert per is None or total is False
+
+    if per == 'share':
+        key = 'revenuePerShare'
+    elif per == 'employee':
+        key = 'revenuePerEmployee'
+    elif total:
+        key = 'totalRevenue'
+    else:
+        key = 'revenue'
+
+    return D(stat(ticker, key))
+
+def marketcap(ticker):
+    key = 'marketcap'
+    return D(stat(ticker, key))
+
+def profit_margin(ticker):
+    key = 'profitMargin'
+    return D(stat(ticker, key))
+
+def price(ticker, ratio=None):
+    if ratio is None:
+        return _price_agg(ticker)
+    elif ratio == 'sales':
+        key = 'priceToSales'
+    elif ratio == 'book':
+        key = 'priceToBook'
+
+    return D(stat(ticker, key))
+
+
+@cachier.cachier(stale_after=datetime.timedelta(days=90))
+@util.debug.measure
+def _sector_agg(ticker=None): return _iex_aggregator('get_sector', ticker)
+sector = lambda ticker: _sector_agg(ticker)
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=12))
 @util.debug.measure
 def _quote_agg(ticker=None): return _iex_aggregator('get_quote', ticker)
 quote = lambda ticker: _quote_agg(ticker)
-
-
-@cachier.cachier(stale_after=datetime.timedelta(hours=3))
-@util.debug.measure
-def _stats_agg(ticker=None): return _iex_aggregator('get_key_stats', ticker)
-stats = lambda ticker: _stats_agg(ticker)
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=3))
@@ -424,25 +550,6 @@ splits = lambda ticker: _splits_agg(ticker)
 @util.debug.measure
 def _previous_day_prices_agg(ticker=None): return _iex_aggregator('get_previous_day_prices', ticker)
 previous_day_prices = lambda ticker: _previous_day_prices_agg(ticker)
-
-
-@cachier.cachier(stale_after=datetime.timedelta(days=7))
-@util.debug.measure
-def _market_cap_agg(ticker=None): return _iex_aggregator('get_market_cap', ticker)
-market_cap = lambda ticker: _market_cap_agg(ticker)
-marketcap = market_cap
-
-
-#@cachier.cachier(stale_after=datetime.timedelta(days=90))
-#@util.debug.measure
-#def _sector_agg(ticker=None): return _iex_aggregator('get_sector', ticker)
-#sector = lambda ticker: _sector_agg(ticker)
-
-
-@cachier.cachier(stale_after=datetime.timedelta(days=1))
-@util.debug.measure
-def _shares_outstanding_agg(ticker=None): return _iex_aggregator('get_shares_outstanding', ticker)
-shares_outstanding = lambda ticker: _shares_outstanding_agg(ticker)
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=1))

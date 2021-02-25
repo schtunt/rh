@@ -227,21 +227,13 @@ def _pull_processed_holdings_data(portfolio, T):
     now = util.datetime.now()
     data = []
 
-    with ShadyBar('%48s' % 'Refreshing Robinhood Portfolio Data', max=len(portfolio)+7) as bar:
+    with ShadyBar('%48s' % 'Refreshing Robinhood Portfolio Data', max=len(portfolio)+5) as bar:
         # 1. Pull holdings
         holdings = api.holdings()
         bar.next()
 
-        # 2. Pull Prices
-        prices = { ticker: D(price) for ticker, price in api._price_agg().items() }
-        bar.next()
-
-        # 3. Pull Betas
-        betas  = { ticker: D(beta) for ticker, beta in api._beta_agg().items() }
-        bar.next()
-
-        # 4. Pull Option Positions
-        _data = _option_positions(prices)
+        # 2. Pull Option Positions
+        _data = _option_positions(api._price_agg())
         collaterals = _data['collaterals']
         next_expiries = _data['next_expiries']
         urgencies = _data['urgencies']
@@ -249,22 +241,22 @@ def _pull_processed_holdings_data(portfolio, T):
         del _data
         bar.next()
 
-        # 5. Pull Options Orders
+        # 3. Pull Options Orders
         _data = _option_orders()
         premiums = _data['premiums']
         closed = _data['closed']
         del _data
         bar.next()
 
-        # 6. Pull Stock Orders (blob)
+        # 4. Pull Stock Orders (blob)
         stock_orders = _stock_orders()
         bar.next()
 
-        # 7. Pull Dividends data
+        # 5. Pull Dividends data
         dividends = api.dividends()
         bar.next()
 
-        # -. Add all rows to Python list first
+        # 6. Add all rows to Python list first
         _timers = {}
         for ticker, stock in portfolio.items():
             bar.next()
@@ -285,12 +277,6 @@ def _pull_processed_holdings_data(portfolio, T):
             cusv = cbu['short']['value']
             culq = cbu['long']['qty']
             culv = cbu['long']['value']
-
-            if ticker not in prices:
-                prices[ticker] = api.price(ticker)
-
-            if ticker not in betas:
-                betas[ticker] = api.beta(ticker)
 
             _opened = '\n'.join(opened.get(ticker, []))
             _closed = '\n'.join(closed.get(ticker, []))
@@ -314,8 +300,9 @@ def _pull_processed_holdings_data(portfolio, T):
 
             row = dict(
                 ticker=ticker,
-                price=prices[ticker],
+                price=api.price(ticker),
                 pcp=D(quote['previousClose']),
+                beta=api.beta(ticker),
                 quantity=holding['quantity'],
                 average_buy_price=holding['average_buy_price'],
                 equity=holding['equity'],
@@ -414,7 +401,7 @@ def _option_positions(prices):
     urgencies = defaultdict(D)
     for option in [o for o in data if D(o['quantity']) != Z]:
         ticker = option['chain_symbol']
-        price = prices[ticker]
+        price = D(prices[ticker])
 
         uri = option['option']
         instrument = api.instrument(uri)

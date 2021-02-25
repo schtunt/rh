@@ -82,8 +82,6 @@ _PUSHCAST = {
 }
 #. }=-
 # Field Extensions -={
-_apidictplucker = lambda getter, key: lambda ticker: getter(ticker)[key]
-
 # price, current stock price
 # pcp, previous closing price
 # ave buy price - your average according to robinhood
@@ -126,7 +124,7 @@ def _extensions(T, S):
         ),
         Field(
             name='marketcap',
-            getter=api.market_cap,
+            getter=api.marketcap,
             pullcast=D,
             pushcast=util.color.mulla,
             description='Market Capitalization',
@@ -134,7 +132,7 @@ def _extensions(T, S):
         ),
         Field(
             name='beta',
-            getter=_apidictplucker(api.stats, 'beta'),
+            getter=api.beta,
             pullcast=D,
             pushcast=util.color.qty,
             description='Beta',
@@ -158,7 +156,7 @@ def _extensions(T, S):
         ),
         Field(
             name='d50ma',
-            getter=_apidictplucker(api.stats, 'day50MovingAvg'),
+            getter=lambda ticker: api.ma(ticker, 'd50ma'),
             pullcast=D,
             pushcast=util.color.mulla,
             description='50-Day Moving Average',
@@ -166,7 +164,7 @@ def _extensions(T, S):
         ),
         Field(
             name='d200ma',
-            getter=_apidictplucker(api.stats, 'day200MovingAvg'),
+            getter=lambda ticker: api.ma(ticker, 'd200ma'),
             pullcast=D,
             pushcast=util.color.mulla,
             description='200-Day Moving Average',
@@ -174,7 +172,7 @@ def _extensions(T, S):
         ),
         Field(
             name='y5cp',
-            getter=_apidictplucker(api.stats, 'year5ChangePercent'),
+            getter=lambda ticker: api.cp(ticker, 'y5cp'),
             pullcast=D,
             pushcast=util.color.pct,
             description='5-Year Percentage Change',
@@ -182,7 +180,7 @@ def _extensions(T, S):
         ),
         Field(
             name='y2cp',
-            getter=_apidictplucker(api.stats, 'year2ChangePercent'),
+            getter=lambda ticker: api.cp(ticker, 'y2cp'),
             pullcast=D,
             pushcast=D,
             description='2-Year Percentage Change',
@@ -190,7 +188,7 @@ def _extensions(T, S):
         ),
         Field(
             name='y1cp',
-            getter=_apidictplucker(api.stats, 'year1ChangePercent'),
+            getter=lambda ticker: api.cp(ticker, 'y1cp'),
             pullcast=D,
             pushcast=util.color.pct,
             description='1-Year Percentage Change',
@@ -198,7 +196,7 @@ def _extensions(T, S):
         ),
         Field(
             name='m6cp',
-            getter=_apidictplucker(api.stats, 'month6ChangePercent'),
+            getter=lambda ticker: api.cp(ticker, 'm6cp'),
             pullcast=D,
             pushcast=util.color.pct,
             description='6-Month Percentage Change',
@@ -206,7 +204,7 @@ def _extensions(T, S):
         ),
         Field(
             name='m3cp',
-            getter=_apidictplucker(api.stats, 'month3ChangePercent'),
+            getter=lambda ticker: api.cp(ticker, 'm3cp'),
             pullcast=D,
             pushcast=util.color.pct,
             description='3-Month Percentage Change',
@@ -214,7 +212,7 @@ def _extensions(T, S):
         ),
         Field(
             name='m1cp',
-            getter=_apidictplucker(api.stats, 'month1ChangePercent'),
+            getter=lambda ticker: api.cp(ticker, 'm1cp'),
             pullcast=D,
             pushcast=util.color.pct,
             description='1-Month Percentage Change',
@@ -222,7 +220,7 @@ def _extensions(T, S):
         ),
         Field(
             name='d30cp',
-            getter=_apidictplucker(api.stats, 'day30ChangePercent'),
+            getter=lambda ticker: api.cp(ticker, 'd30cp'),
             pullcast=D,
             pushcast=util.color.pct,
             description='30-Day Percentage Change',
@@ -230,7 +228,7 @@ def _extensions(T, S):
         ),
         Field(
             name='d5cp',
-            getter=_apidictplucker(api.stats, 'day5ChangePercent'),
+            getter=lambda ticker: api.cp(ticker, 'd5cp'),
             pullcast=D,
             pushcast=util.color.pct,
             description='5-Day Percentage Change',
@@ -238,7 +236,7 @@ def _extensions(T, S):
         ),
         Field(
             name='change',
-            getter=_apidictplucker(api.quote, 'changePercent'),
+            getter=lambda ticker: api.quote(ticker)['changePercent'],
             pullcast=D,
             pushcast=util.color.pct,
             description='Change Percent',

@@ -71,10 +71,11 @@ qty  = lambda q, dp=2: colorize(
 qty1 = lambda q: qty(q, 1)
 
 def qty0(q):
-    s, c = _qty(q)
+    s, c = _qty(D(q))
     return colored(s, 'red') if s is NaN else colored(s, c)
 
 def mulla(m):
+    m = D(m)
     s, c = _qty(m)
     return colored(m, 'red') if s is NaN else colored(('+$%s' if m > 0 else '-$%s') % s, c)
 
