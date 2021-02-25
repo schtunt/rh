@@ -158,32 +158,6 @@ def history(ctx, tickers):
     print(util.debug.measurements())
 
 
-acc = None
-def repl():
-    print("Initializing APIs...")
-
-    global acc
-    acc = account.Account()
-
-    print("Injecting Stock objects for all stocks in your portfolio...")
-    module = sys.modules[__name__]
-
-    print("Done! Available ticker objects:")
-    print(" + api.acc                (Local Robinhood Account object)")
-    print()
-    print(" + api.rh                 (RobinStocksEndpoint API)")
-    print(" + api.iex                (IEXFinanceEndpoint API)")
-    print(" + api.yec                (YahooEarningsCalendarEndpoint API)")
-    print()
-    print(" + acc.stock('<ticker>')  (Local Stock API-Multiplexor object)")
-    print(" + api.<ticker>           (IEXFinanceEndpoint Stock API object)")
-    print(" + S                      (Stocks DataFrame)")
-    print(" + T                      (Transactions DataFrame)")
-    print()
-    print("Meta-helpers for this REPL")
-    print(" + relmod()         (reload wthout having to exit the repl)")
-
-
 def preinitialize():
     util.numbers.preinitialize()
     api.connect()

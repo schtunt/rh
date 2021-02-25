@@ -33,11 +33,32 @@ def relmod():
     importlib.reload(util.output)
 
 rh.preinitialize()
-rh.repl()
 
-datatypes = lambda df=rh.acc._stocks: {
+A = account.Account()
+
+S = A._stocks
+T = A._transactions
+
+print("Account Objects & DataFrames")
+print(" + A                      (Account Object)")
+print(" + S                      (Stocks DataFrame)")
+print(" + T                      (Transactions DataFrame)")
+print()
+print("Stock Objects")
+print(" + A.stock('<ticker>')    (Local Stock API-Multiplexor object)")
+print(" + api.<ticker>           (IEXFinanceEndpoint Stock API object)")
+print()
+print("API Connection Objects")
+print(" + api.rh                 (RobinStocks (Robinhood) API)")
+print(" + api.iex                (IEXCloud API)")
+print(" + api.fd                 (AlphaVantage FundamentalData API)")
+print(" + api.yec                (YahooEarningsCalendar API)")
+print(" + api.fh                 (Finnhub API)")
+print()
+print("Meta-helpers for this REPL")
+print(" + relmod()               (Reload wthout having to exit the repl)")
+print(" + datatypes(df)          (Schema check on Pandas DataFrame (specifically for S and T))")
+
+datatypes = lambda df=S: {
     column: set(map(type, df[column])) for column in df.columns
 }
-
-S = rh.acc._stocks
-T = rh.acc._transactions

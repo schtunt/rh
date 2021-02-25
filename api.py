@@ -1,18 +1,12 @@
-from collections import defaultdict
-
-from secrets import SECRETS
-
-import util
-from util.numbers import D, Z, NaN
-
-#import gc
-#gc.disable()
-
 import os
+import sys
 import datetime
 import pathlib
 
 from collections import defaultdict
+
+import util
+from util.numbers import D, Z, NaN
 
 import cachier
 import hashlib
@@ -23,13 +17,14 @@ import constants
 
 import robin_stocks as rh
 import iexfinance.stocks as iex
-import yahoo_earnings_calendar as yec
-import finnhub as fh
+import yahoo_earnings_calendar as _yec
+import finnhub as _fh
 from alpha_vantage.fundamentaldata import FundamentalData
 from alpha_vantage.sectorperformance import SectorPerformances
 from alpha_vantage.techindicators import TechIndicators
 from alpha_vantage.timeseries import TimeSeries
 
+from secrets import SECRETS
 
 
 TICKER_CHAIN = defaultdict(tuple)
@@ -63,10 +58,11 @@ IEX_STOCKS = {}
 
 CONNECTIONS = {}
 
-
 @util.debug.measure
 def connect():
     if len(CONNECTIONS) > 0: return
+
+    module = sys.modules[__name__]
 
     secrets = defaultdict(lambda: None, SECRETS)
     username, password = (
@@ -81,12 +77,14 @@ def connect():
     os.environ['IEX_OUTPUT_FORMAT'] = 'json'
 
     finnhub_api_key = secrets['finnhub_api_key']
-    CONNECTIONS['fh'] = fh.Client(
+    CONNECTIONS['fh'] = _fh.Client(
         api_key=finnhub_api_key
     ) if finnhub_api_key else None
+    module.fh = CONNECTIONS['fh']
 
-    CONNECTIONS['yec'] = yec.YahooEarningsCalendar()
+    CONNECTIONS['yec'] = _yec.YahooEarningsCalendar()
     # use datetime.fromtimestamp() for ^^'s results
+    module.yec = CONNECTIONS['yec']
 
     alpha_vantage_api_key = secrets['alpha_vantage_api_key']
     os.environ['ALPHAVANTAGE_API_KEY'] = alpha_vantage_api_key
@@ -96,6 +94,7 @@ def connect():
     CONNECTIONS['av'] = dict(
         fd=FundamentalData()
     )
+    module.fd = CONNECTIONS['av']['fd']
 
 @util.debug.measure
 def connected(fn):
