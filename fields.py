@@ -36,7 +36,7 @@ class Field:
 _PULLCAST = dict(
     ticker=str,
     price=D, pcp=D, quantity=D, average_buy_price=D, equity=D, percent_change=D,
-    equity_change=D, pe_ratio=D, pb_ratio=D,
+    equity_change=D,
     percentage=D,
     type=str, name=str,
     cnt=D, trd=D, qty=D,
@@ -60,8 +60,6 @@ _PUSHCAST = {
     'equity': util.color.mulla,
     'percent_change': util.color.pct,
     'equity_change': util.color.mulla,
-    'pe_ratio': util.color.qty,
-    'pb_ratio': util.color.qty,
     'percentage': util.color.pct,
     'delta': util.color.qty,
     'short': util.color.qty1,
@@ -90,6 +88,38 @@ _PUSHCAST = {
 
 def _extensions(T, S):
     return [
+        Field(
+            name='p2e',
+            getter=lambda ticker: api.price(ticker, ratio='p2e'),
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='P/E Ratio',
+            documentation='https://www.investopedia.com/terms/i/industry.asp',
+        ),
+        Field(
+            name='p2b',
+            getter=lambda ticker: api.price(ticker, ratio='p2b'),
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='P/B Ratio',
+            documentation='https://www.investopedia.com/terms/i/industry.asp',
+        ),
+        Field(
+            name='p2s',
+            getter=lambda ticker: api.price(ticker, ratio='p2s'),
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='P/S Ratio',
+            documentation='https://www.investopedia.com/terms/i/industry.asp',
+        ),
+        Field(
+            name='peg',
+            getter=lambda ticker: api.price(ticker, ratio='peg'),
+            pullcast=D,
+            pushcast=util.color.pct,
+            description='PEG Ratio',
+            documentation='https://www.investopedia.com/terms/i/industry.asp',
+        ),
         Field(
             name='industry',
             getter=api.industry,

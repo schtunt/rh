@@ -324,8 +324,6 @@ def _pull_processed_holdings_data(portfolio, T):
                 culv=culv,
                 premium_collected=premium,
                 dividends_collected=sum(D(div['amount']) for div in dividend),
-                pe_ratio=D(fundamentals['pe_ratio']),
-                pb_ratio=D(fundamentals['pb_ratio']),
                 collateral_call=D(collateral['call']),
                 collateral_put=D(collateral['put']),
                 ttl=ttl,

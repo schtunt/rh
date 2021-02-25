@@ -379,9 +379,13 @@ def _iex_aggregator(fn_name, ticker=None):
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @util.debug.measure
-def _price_agg(ticker=None): return {
-    ticker: D(price) for ticker, price in _iex_aggregator('get_price', ticker).items()
-}
+def _price_agg(ticker=None):
+    if ticker is not None:
+        return _iex_aggregator('get_price', ticker)
+
+    return {
+        ticker: D(price) for ticker, price in _iex_aggregator('get_price').items()
+    }
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=1))

@@ -45,7 +45,8 @@ VIEWS = [
             'pcp', 'price', 'percent_change', 'change',           # Price and Last Closing Price
             'cbps', 'cbps%',                                      # Share Performance in this PF,
             'premium_collected', 'dividends_collected',           # Share Performance in this PF
-            'pe_ratio', 'pb_ratio', 'beta', 'sharpe', 'treynor',  # Ratios
+            'p2e', 'p2b', 'p2s', 'peg',                           # Ratios
+            'beta', 'sharpe', 'treynor',                          # Other Ratios
             'momentum', 'ma', 'd200ma', 'd50ma',                  # Moving Avs & Score + Momentum
             'urgency', 'next_expiry', 'activities',               # Activity
         ],
