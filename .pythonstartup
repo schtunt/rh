@@ -1,8 +1,13 @@
+import operator
+import statistics
+
 import scipy as sp
 import numpy as np
 import pandas as pd
 import pandas_datareader as pdr
 import matplotlib.pyplot as plt
+
+from functools import reduce
 
 import importlib
 
@@ -16,6 +21,7 @@ import stocks
 import models
 import account
 import constants
+
 
 from util.numbers import D, Z
 
@@ -65,3 +71,7 @@ datatypes = lambda df=S: {
 }
 
 nullrows = lambda df=S: S[S.isnull().any(axis=1)]
+def shownans(df=S, index='ticker'):
+    '''Returns a table showing only rows and columns that contain NaNs'''
+    df = df.set_index(index)
+    return df.loc[:, df.isna().any()][df.isna().any(axis=1)]

@@ -19,11 +19,11 @@ class Account:
         portfolio_is_complete = False
         if bool(len(tickers) == 0):
             portfolio_is_complete = True
-            tickers = tuple(api.symbols())
+            tickers = tuple(api.symbols(remove='expired'))
 
         self._portfolio.update({
             ticker: stocks.Stock(self, ticker)
-            for ticker in filter(api.is_white, tickers)
+            for ticker in filter(api.whitelisted, tickers)
         })
 
         self._stocks = slurp.stocks(

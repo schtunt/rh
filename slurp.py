@@ -14,7 +14,7 @@ import util
 import events
 import fields
 
-from util.numbers import D, Z
+from util.numbers import D, Z, NaN
 
 FEATHER_BASE='/tmp'
 def feathers():
@@ -84,7 +84,7 @@ def transactions():
     DataFrame Update 2 - Options information pulled from Robinhood
     '''
 
-    symbols = api.symbols()
+    symbols = api.symbols(remove='expired')
     with ShadyBar('%48s' % 'Building Transactions', max=len(symbols)+6) as bar:
         # 1. Download Stock Transactions from Robinhood...
         feather = featherfile('transactions')
@@ -132,6 +132,9 @@ def transactions():
 
         cbtally = defaultdict(list)
         def _costbasis(row):
+            if api.blacklisted(row.symbol, full=True):
+                return pd.Series([NaN, NaN, NaN, NaN])
+
             data = cbtally[row.symbol]
 
             signum = {'buy':-1, 'sell':+1}[row.side]

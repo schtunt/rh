@@ -4,8 +4,10 @@ import typing
 import pathlib
 import datetime
 import dataclasses
+import operator
 
 from collections import defaultdict
+from functools import reduce
 
 import util
 from util.numbers import D, Z, NaN
@@ -38,17 +40,34 @@ TICKER_CHAIN.update({
     'AABAZZ': ( 'AABA', ),
 })
 
-TICKER_BLACKLIST = set((
-    'AABAZZ',
-)) | set(
-    tocker for chain in TICKER_CHAIN.values() for tocker in chain
-)
-for ticker in TICKER_BLACKLIST:
-    if ticker in TICKER_CHAIN:
-        TICKER_BLACKLIST |= set(TICKER_CHAIN[ticker])
+def blacklist(full=False):
+    '''
+    Modes:
+     - full: remove expired and old tickers
+     - half: remove expired tickers only
+    '''
+    blacklist = set((
+        'AABAZZ',
+    ))
 
-is_black = lambda ticker: bool(ticker in TICKER_BLACKLIST)
-is_white = lambda ticker: bool(ticker not in TICKER_BLACKLIST)
+    blacklist |= set(
+        reduce(
+            operator.or_,
+            (TICKER_CHAIN.get(ticker, set()) for ticker in blacklist)
+        )
+    )
+
+    if not full:
+        return blacklist
+
+    return blacklist | set(
+        tocker for chain in TICKER_CHAIN.values() for tocker in chain
+    )
+
+
+blacklisted = lambda ticker, full=True: bool(ticker in blacklist(full))
+whitelisted = lambda ticker, full=False: bool(ticker not in blacklist(full))
+
 tockers4ticker = lambda ticker: set((ticker,) + TICKER_CHAIN[ticker])
 def tocker2ticker(tocker):
     for ticker, tockers in TICKER_CHAIN.items():
@@ -80,6 +99,8 @@ def connect():
     iex_api_key = secrets['iex_api_key']
     os.environ['IEX_TOKEN'] = iex_api_key
     os.environ['IEX_OUTPUT_FORMAT'] = 'json'
+    if iex_api_key[0] == 'T':
+        os.environ['IEX_API_VERSION'] = 'sandbox'
 
     finnhub_api_key = secrets['finnhub_api_key']
     CONNECTIONS['fh'] = _fh.Client(
@@ -208,21 +229,37 @@ def instrument2symbol(url):
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=1))
 @util.debug.measure
-def symbols():
-    instruments = positions('stocks', 'all', info='instrument')
-    return sorted(
-        (
-            set(
-                map(
-                    instrument2symbol,
-                    instruments
-                )
-            ) | set(
-                holdings().keys()
-            )
-        ) - TICKER_BLACKLIST
+def symbols(remove='old+expired'):
+    '''
+    The `superset' flag will also add older symbols, but not expired ones.
+    '''
+
+    symbols = set(
+        map(
+            instrument2symbol,
+            positions('stocks', 'all', info='instrument'),
+        )
+    ) | set(
+        holdings().keys()
     )
 
+    if remove is not None:
+        remove = remove.split('+')
+
+    if remove is None:
+        pass
+    elif 'expired' in remove and 'old' in remove:
+        # remove expired and old
+        symbols -= blacklist(full=True)
+    elif 'expired' in remove:
+        # remove just expired
+        symbols -= blacklist(full=False)
+    elif 'old' in remove:
+        # remove just old (no use-case for this)
+        #symbols -= (blacklist(full=True) - blacklist(full=False))
+        raise RuntimeError('Why?')
+
+    return tuple(sorted(list(symbols)))
 
 @cachier.cachier(stale_after=datetime.timedelta(days=2))
 @util.debug.measure
@@ -326,63 +363,34 @@ def events(ticker):
 
 
 # IEX Aggregation -={
-IEX_AGGREGATOR = defaultdict(dict)
-def _iex_aggregator(fn_name, ticker=None):
-    '''
-    If the in-memory cache dict IEX_AGGREGATOR is empty, fill it will all tickers via
-    batched requests.
-
-    Note this cache last as long as the process life, don't rely on this to save on API
-    bandwidth over mny runs of the program, rely on `cachier'.
-
-    After that, if a ticker is supplied, make sure the ticker is added to that cache if
-    not in there already.
-    '''
-    agg = IEX_AGGREGATOR[fn_name]
-    if len(agg) == 0:
-        for chunk in util.chunk(symbols(), 100):
-            fn = getattr(iex.Stock(chunk), fn_name)
-            retrieved = fn()
-            if type(retrieved) is list:
-                data = defaultdict(list)
-                for datum in retrieved:
-                    data[datum['symbol']].append(datum)
-            elif type(retrieved) is dict:
-                data = {ticker: datum for ticker, datum in retrieved.items()}
-            else:
-                raise RuntimeError(
-                    "Error: `%s' (retrieved) is neither dict nor list" % retrieved
-                )
-
-            agg.update(data)
-
-    if ticker is None:
-        if fn_name == 'get_financials':
-            # Yes, robin-stocks is returning this mess for financials, which we need to correct
-            return {
-                ticker: datum.get('financials', [None])[0]
-                for tticker, datum in data2.items()
-            }
+@cachier.cachier(stale_after=datetime.timedelta(hours=3))
+@util.debug.measure
+def _iex_aggregator(fn_name):
+    agg = dict()
+    for chunk in util.chunk(symbols(remove='expired'), 100):
+        fn = getattr(iex.Stock(list(chunk)), fn_name)
+        retrieved = fn()
+        if type(retrieved) is list:
+            data = defaultdict(list)
+            for datum in retrieved:
+                data[datum['symbol']].append(datum)
+        elif type(retrieved) is dict:
+            data = {ticker: datum for ticker, datum in retrieved.items()}
         else:
-            return {ticker: datum for ticker, datum in agg.items()}
+            raise RuntimeError(
+                "Error: `%s' (retrieved) is neither dict nor list" % retrieved
+            )
 
-    if ticker not in agg:
-        fn = getattr(iex.Stock(ticker), fn_name)
-        try:
-            datum = fn()
-            if datum:
-                agg[ticker] = datum
-        except:
-            print("Error handling ticker `%s'" % ticker)
-            raise
-    else:
-        datum = agg[ticker]
+        agg.update(data)
 
     if fn_name == 'get_financials':
-        # Yes, robin-stocks is returning this mess for financials, which we need to correct
-        return datum.get('financials', [None])[0]
+        # Yes, iexfinance is returning this mess for financials, which we need to correct
+        return {
+            ticker: datum.get('financials', [None])[0]
+            for ticker, datum in agg.items()
+        }
     else:
-        return datum
+        return {ticker: datum for ticker, datum in agg.items()}
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=1))
@@ -393,29 +401,23 @@ def _prices_last_year_agg():
         symbols, data_source='yahoo', start=when, end=when
     )['Adj Close'].values[0]
     return dict(zip(symbols(), map(D, prices)))
-_prices_last_year = lambda ticker: _prices_last_year_agg[ticker]
+_prices_last_year = lambda ticker: _prices_last_year_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @util.debug.measure
-def _price_agg(ticker=None):
-    if ticker is not None:
-        return _iex_aggregator('get_price', ticker)
-
-    return {
-        ticker: D(price) for ticker, price in _iex_aggregator('get_price').items()
-    }
+def _price_agg(): return { t: D(p) for t, p in _iex_aggregator('get_price').items() }
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=1))
 @util.debug.measure
-def _stats_key_agg(ticker=None): return _iex_aggregator('get_key_stats', ticker)
-_stats_key = lambda ticker: _stats_key_agg(ticker)
+def _stats_key_agg(): return _iex_aggregator('get_key_stats')
+_stats_key = lambda ticker: _stats_key_agg()[ticker]
 
 @cachier.cachier(stale_after=datetime.timedelta(days=7))
 @util.debug.measure
-def _stats_advanced_agg(ticker=None): return _iex_aggregator('get_advanced_stats', ticker)
-_stats_advanced = lambda ticker: _stats_advanced_agg(ticker)
+def _stats_advanced_agg(): return _iex_aggregator('get_advanced_stats')
+_stats_advanced = lambda ticker: _stats_advanced_agg()[ticker]
 #'forwardPERatio', 'pegRatio', 'peHigh', 'peLow',
 #'week52highDate', 'week52lowDate', 'putCallRatio',
 #'week52high', 'week52low', 'week52highSplitAdjustOnly', 'week52highDateSplitAdjustOnly',
@@ -426,30 +428,26 @@ _stats_advanced = lambda ticker: _stats_advanced_agg(ticker)
 #'year1ChangePercent', 'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent',
 #'month1ChangePercent', 'day30ChangePercent', 'day5ChangePercent'
 
-IEX_KEY_STATS={
-    'companyName', 'marketcap', 'week52high', 'week52low', 'week52highSplitAdjustOnly',
-    'week52lowSplitAdjustOnly', 'week52change', 'sharesOutstanding', 'avg10Volume',
-    'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees', 'ttmEPS', 'ttmDividendRate',
-    'dividendYield', 'nextDividendDate', 'exDividendDate', 'nextEarningsDate', 'peRatio', 'beta',
-    'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent', 'year1ChangePercent',
-    'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent', 'month1ChangePercent',
-    'day30ChangePercent', 'day5ChangePercent'
-}
-def stat(ticker, stat=None):
-    if stat in IEX_KEY_STATS:
-        data = _stats_key_agg(ticker)
-    else:
-        data = _stats_advanced_agg(ticker)
-
-    return data if stat is None else data[stat]
-
-def stats(ticker, key=None, advanced=False):
-    if not advanced:
-        data = _stats_advanced_agg(ticker)
-    else:
-        data = _stats_key_agg(ticker)
-
-    return data if stat is None else data[stat]
+#IEX_KEY_STATS={
+#    'companyName', 'marketcap', 'week52high', 'week52low', 'week52highSplitAdjustOnly',
+#    'week52lowSplitAdjustOnly', 'week52change', 'sharesOutstanding', 'avg10Volume',
+#    'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees', 'ttmEPS', 'ttmDividendRate',
+#    'dividendYield', 'nextDividendDate', 'exDividendDate', 'nextEarningsDate', 'peRatio', 'beta',
+#    'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent', 'year1ChangePercent',
+#    'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent', 'month1ChangePercent',
+#    'day30ChangePercent', 'day5ChangePercent'
+#}
+def stats(ticker=None):
+    '''
+    Advanced stats are expensive, and so cached for longer periods.  The basic stats are
+    a subset of the advanced stats, cheaper, and so cached for shoter periods.  Here we
+    mask the two calls, take the advanced stats, and update it with the fresher, albeir,
+    crapier basic "key" stats.
+    '''
+    advanced = _stats_advanced_agg()
+    basic = _stats_key_agg()
+    merged = {ticker: datum|advanced[ticker] for ticker,datum in advanced.items()}
+    return merged if ticker is None else merged[ticker]
 
 def ebitda(ticker):
     '''
@@ -457,7 +455,7 @@ def ebitda(ticker):
     Used to measure the cash flow of a business.
     '''
     key = 'EBITDA'
-    return D(stat(ticker, key))
+    return D(stats(ticker)[key])
 
 def ebit(ticker):
     '''
@@ -470,7 +468,8 @@ def ebit(ticker):
     '''
 
     key = 'ebit'
-    return D(financials(ticker)[key])
+    f = financials(ticker)
+    return NaN if f is None else D(f[key])
 
 def ebt(ticker):
     '''
@@ -486,32 +485,39 @@ def dividends_paid(ticker):
     account.
     '''
     key = 'dividendsPaid'
-    d = financials(ticker)[key]
-    return Z if d is None else D(d)
+    f = financials(ticker)
+    return NaN if f is None else D(f[key])
 
 def income(ticker):
     key = 'netIncome'
-    return D(financials(ticker)[key])
+    f = financials(ticker)
+    return NaN if f is None else D(f[key])
 
 def liabilities(ticker):
     key = 'totalLiabilities'
     return D(financials(ticker)[key])
+    f = financials(ticker)
+    return NaN if f is None else D(f[key])
 
 def debt(ticker):
     key = 'totalDebt'
-    return D(financials(ticker)[key])
+    f = financials(ticker)
+    return NaN if f is None else D(f[key])
 
 def assets(ticker):
     key = 'totalAssets'
-    return D(financials(ticker)[key])
+    f = financials(ticker)
+    return NaN if f is None else D(f[key])
 
 def cash(ticker):
     key = 'totalCash'
-    return D(financials(ticker)[key])
+    f = financials(ticker)
+    return NaN if f is None else D(f[key])
 
 def equity(ticker):
     key = 'shareholderEquity'
-    return D(financials(ticker)[key])
+    f = financials(ticker)
+    return NaN if f is None else D(f[key])
 
 def roc(ticker):
     '''
@@ -534,19 +540,19 @@ def roic(ticker):
     )
 
 def av(ticker, av):
-    return D(stat(ticker, dict(
+    return D(stats(ticker)[dict(
         a10v='avg10Volume',
         a30v='avg30Volume',
-    )[av]))
+    )[av]])
 
 def ma(ticker, ma):
-    return D(stat(ticker, dict(
+    return D(stats(ticker)[dict(
         d200ma='day200MovingAvg',
         d50ma='day50MovingAvg',
-    )[ma]))
+    )[ma]])
 
 def cp(ticker, cp):
-    return D(stat(ticker, dict(
+    return D(stats(ticker)[dict(
         y5cp='year5ChangePercent',
         y2cp='year2ChangePercent',
         y1cp='year1ChangePercent',
@@ -555,66 +561,53 @@ def cp(ticker, cp):
         m1cp='month1ChangePercent',
         d30cp='day30ChangePercent',
         d5cp='day5ChangePercent',
-    )[cp]))
+    )[cp]])
 
 
 def beta(ticker):
     key = 'beta'
-    return D(stat(ticker, key))
+    return D(stats(ticker)[key])
 
 def shares_outstanding(ticker):
     key = 'sharesOutstanding'
-    return D(stat(ticker, key))
+    return D(stats(ticker)[key])
 
 def cash(ticker, total=True):
-    if total:
-        key = 'totalCash'
-
-    return D(stat(ticker, key))
+    if total: key = 'totalCash'
+    return D(stats(ticker)[key])
 
 def debt(ticker, ratio=None):
-    if ratio is None:
-        key = 'currentDebt'
-    else:
-        key = 'debtToEquity'
+    if ratio is None: key = 'currentDebt'
+    else: key = 'debtToEquity'
 
-    return D(stat(ticker, key))
+    return D(stats(ticker)[key])
 
 def revenue(ticker, total=False, per=None):
     assert per is None or total is False
 
-    if per == 'share':
-        key = 'revenuePerShare'
-    elif per == 'employee':
-        key = 'revenuePerEmployee'
-    elif total:
-        key = 'totalRevenue'
-    else:
-        key = 'revenue'
+    if per == 'share': key = 'revenuePerShare'
+    elif per == 'employee': key = 'revenuePerEmployee'
+    elif total: key = 'totalRevenue'
+    else: key = 'revenue'
 
-    return D(stat(ticker, key))
+    return D(stats(ticker)[key])
 
 def marketcap(ticker):
     key = 'marketcap'
-    return D(stat(ticker, key))
+    return D(stats(ticker)[key])
 
 def profit_margin(ticker):
     key = 'profitMargin'
-    return D(stat(ticker, key))
+    return D(stats(ticker)[key])
 
 def price(ticker, ratio=None):
-    if ratio is None:
-        return _price_agg(ticker)
-    elif ratio == 'peg':
-        key = 'pegRatio'
-    elif ratio == 'p2e':
-        key = 'peRatio'
-    elif ratio == 'p2s':
-        key = 'priceToSales'
-    elif ratio == 'p2b':
-        key = 'priceToBook'
+    if ratio is None: return _price_agg()[ticker]
+    elif ratio == 'peg': key = 'pegRatio'
+    elif ratio == 'p2e': key = 'peRatio'
+    elif ratio == 'p2s': key = 'priceToSales'
+    elif ratio == 'p2b': key = 'priceToBook'
 
-    return D(stat(ticker, key))
+    return D(stats(ticker)[key])
 
 def ev(ticker, ratio=None):
     '''
@@ -638,52 +631,51 @@ def ev(ticker, ratio=None):
         denominator = numerator
         numerator = 'EBIT'
 
-    return D(
-        stat(ticker, numerator)
-    ) / D(1) if denominator is None else D(
-        stat(ticker, denominator)
+    s = stats(ticker)
+    return D(s[numerator]) / D(
+        1 if denominator is None else s[denominator]
     )
 
 @cachier.cachier(stale_after=datetime.timedelta(days=90))
 @util.debug.measure
-def _sector_agg(ticker=None): return _iex_aggregator('get_sector', ticker)
-sector = lambda ticker: _sector_agg(ticker)
+def _sector_agg(): return _iex_aggregator('get_sector')
+sector = lambda ticker: _sector_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(weeks=4))
 @util.debug.measure
-def _financials_agg(ticker=None): return _iex_aggregator('get_financials', ticker)
-financials = lambda ticker: _financials_agg(ticker)
+def _financials_agg(): return _iex_aggregator('get_financials')
+financials = lambda ticker: _financials_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=12))
 @util.debug.measure
-def _quote_agg(ticker=None): return _iex_aggregator('get_quote', ticker)
-quote = lambda ticker: _quote_agg(ticker)
+def _quote_agg(): return _iex_aggregator('get_quote')
+quote = lambda ticker: _quote_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=7))
 @util.debug.measure
-def _earnings_agg(ticker=None): return _iex_aggregator('get_earnings', ticker)
-earnings = lambda ticker: _earnings_agg(ticker)
+def _earnings_agg(): return _iex_aggregator('get_earnings')
+earnings = lambda ticker: _earnings_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @util.debug.measure
-def _splits_agg(ticker=None): return _iex_aggregator('get_splits', ticker)
-splits = lambda ticker: _splits_agg(ticker)
+def _splits_agg(): return _iex_aggregator('get_splits')
+splits = lambda ticker: _splits_agg().get(ticker, [])
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=4))
 @util.debug.measure
-def _previous_day_prices_agg(ticker=None): return _iex_aggregator('get_previous_day_prices', ticker)
-previous_day_prices = lambda ticker: _previous_day_prices_agg(ticker)
+def _previous_day_prices_agg(): return _iex_aggregator('get_previous_day_prices')
+previous_day_prices = lambda ticker: _previous_day_prices_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=4))
 @util.debug.measure
-def _insider_transactions_agg(ticker=None): return _iex_aggregator('get_insider_transactions', ticker)
-insider_transactions = lambda ticker: _insider_transactions_agg(ticker)
+def _insider_transactions_agg(): return _iex_aggregator('get_insider_transactions')
+insider_transactions = lambda ticker: _insider_transactions_agg()[ticker]
 
 
 # }=-
@@ -717,7 +709,7 @@ class StockMultiplexor:
 
 def __getattr__(ticker: str) -> iex.Stock:
     _ticker = ticker.upper()
-    if _ticker not in symbols():
+    if _ticker not in symbols(remove=None):
         raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
 
     return StockMultiplexor(

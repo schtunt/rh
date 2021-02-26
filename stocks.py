@@ -33,7 +33,7 @@ class Stock:
                     date=ss['exDate'],
                     divisor=ss['fromFactor'],
                     multiplier=ss['toFactor'],
-                ) for ss in api.splits(ticker) if not api.is_black(ticker)
+                ) for ss in api.splits(ticker)
             )
         self.splits.sort(key=lambda ss: ss.date)
 

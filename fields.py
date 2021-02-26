@@ -1,7 +1,8 @@
 import sys
 import statistics
-import scipy.stats
+import scipy as sp
 import pandas as pd
+import numpy as np
 import datetime
 
 import typing
@@ -376,11 +377,17 @@ def _extensions(T, S):
                     'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp',
                 ),
                 chain=(
-                    lambda R: { R.pop('ticker'): R },
+                    lambda R: { R.pop('ticker'): {
+                        ticker: np.float(decimal) for ticker, decimal in R.items()}
+                    },
                     lambda R: [
-                        scipy.stats.percentileofscore(
-                            S[period].to_numpy(),
-                            pd.to_numeric(percentile),
+                        sp.stats.percentileofscore(
+                            S[[
+                                'y5cp', 'y2cp', 'y1cp',
+                                'm6cp', 'm3cp', 'm1cp',
+                                'd30cp', 'd5cp'
+                            ]].fillna(S.mean(numeric_only=True))[period].to_numpy(),
+                            pd.to_numeric(percentile, errors='coerce'),
                         ) for ticker, percentiles in R.items()
                         for period, percentile in percentiles.items()
                     ],
