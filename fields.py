@@ -440,27 +440,19 @@ def _typecasters():
     })
     return defaultdict(lambda: str, typecasters)
 
-def _extend(S, field, prioritize_missing):
+def _extend(S, field):
     figet = field.getter
     cast = field.pullcast
     try:
         if figet is None:
             S[field.name] = S[field.name].apply(cast)
         elif type(figet) is not FieldComplexConstructor:
-            # prioritize_missing implies user has not requested specific stocks, i.e., a
-            # targetted query (so fresh data is desired)
             series = []
             for ticker in S['ticker']:
-                if field.name not in S.columns:
-                    series.append(cast(figet(ticker)))
-                elif prioritize_missing and S[field.name] in (None, NaN, NaT, 'N/A'):
-                    series.append(cast(figet(ticker, ignore_cache=True)))
-                elif not prioritize_missing: # i.e., no priority at all, do all tickers
-                    #series.append(cast(figet(ticker, ignore_cache=True)))
-                    series.append(cast(figet(ticker)))
-                else:
-                    # TODO: Add age to every row, this final block will refresh based on age
-                    pass
+                datum = cast(figet(ticker))
+                if datum in (None, NaN, NaT, 'N/A'):
+                    datum = cast(figet(ticker, ignore_cache=True))
+                series.append(datum)
             S[field.name] = series
         else:
             S[field.name] = pd.Series((
@@ -484,15 +476,6 @@ def _extend(S, field, prioritize_missing):
 
 class Fields:
     def __init__(self, data, T, S=None):
-        # Some APIs (free ones) will limit requests.  To make this useable, if the user has
-        # requested only a handful of tickers in their query, then to to hit the API unlit
-        # throttled.  Otherwise, prioritize missing ticker data over old ticker data, to avoid
-        # refreshing the same tickers over and over again.  This does not apply for the field
-        # type `FieldComplexConstructor', since those should not be making direct API calls,
-        # but create new fields using existing ones.
-        tickers_requested = len(data)
-        prioritize_missing = tickers_requested > 5
-
         # 1. Create new DataFrame first.  This DataFrame will be limited to the list of tickers
         # supplied by the user, if any, otherwise as inclusive as the stored DataFrame.
         typecasts = _typecasters()
@@ -520,7 +503,7 @@ class Fields:
 
         # 4. Extend fields (add new columns)
         for field in _extensions(T, S):
-            _extend(S, field, prioritize_missing)
+            _extend(S, field)
 
         # 5. Sort the DataFrame by Ticker
         S.sort_values(by='ticker', inplace=True)
