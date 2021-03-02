@@ -160,7 +160,7 @@ def sentiments(blob):
 # 'LastSplitFactor', 'LastSplitDate'
 
 _AV_STOP = False
-@cachier.cachier(stale_after=datetime.timedelta(seconds=300))
+@cachier.cachier(stale_after=datetime.timedelta(days=1))
 def _overview(ticker):
     '''
     The free-tier of AV imposes a 500/day day-limit, and a 5/minute rate-limit.  Hence it will
@@ -181,7 +181,7 @@ def _overview(ticker):
 #    overview = _overview(ticker)
 #    return overview['Sector'] if overview is not None else 'N/A'
 
-@cachier.cachier(stale_after=datetime.timedelta(days=100))
+@cachier.cachier(stale_after=datetime.timedelta(days=7))
 def industry(ticker):
     overview = _overview(ticker)
     return overview['Industry'] if overview is not None else 'N/A'

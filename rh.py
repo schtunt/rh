@@ -30,42 +30,45 @@ def cli(ctx, debug):
 
 CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 
-VIEWS = [
-    {
-        'configurations': [
-            { 'title': 'all', 'sort_by': ['ticker'] },
-            { 'title': 'active', 'sort_by': ['urgency'], 'filter_by': 'next_expiry' },
-            { 'title': 'expiring', 'sort_by': ['urgency'], 'filter_by': 'soon_expiring' },
-            { 'title': 'urgent', 'sort_by': ['next_expiry'], 'filter_by': 'urgent' },
-        ],
-        'fields': [
-            'sector', 'industry', 'ticker',
-            'quantity', 'equity', 'equity_change',                # Holdings
-            'marketcap', 'ev', 'so',                              # Company Info
-            'pcp', 'price', 'percent_change', 'change',           # Price and Last Closing Price
-            'cbps', 'cbps%',                                      # Share Performance in this PF,
-            'premium_collected', 'dividends_collected',           # Share Performance in this PF
-            'p2e', 'p2b', 'p2s', 'peg',                           # Ratios
-            'beta', 'sharpe', 'treynor',                          # Other Ratios
-            'momentum', 'ma', 'd200ma', 'd50ma',                  # Moving Avs & Score + Momentum
-            'urgency', 'next_expiry', 'activities',               # Activity
-        ],
+FIELD_GROUPS = {
+    'base': [ 'ticker' ],
+    'company': [ 'sector', 'industry', 'marketcap', 'ev', 'so' ],
+    'position': [ 'quantity', 'price', 'equity' ],
+    'ltrends': [ 'equity_change', 'percent_change' ],
+    'ma': [ 'd200ma', 'd50ma' ],
+    'strends': [ 'premium_collected', 'dividends_collected' ],
+    'daytrader': [ 'pcp', 'change' ],
+    'ratios': [ 'p2e', 'p2b', 'p2s', 'peg' ],
+    'ratios-ii': [ 'beta', 'sharpe', 'treynor' ],
+    'scores': [ 'momentum', 'ma', 'cbps', 'cbps%' ],
+    'options': [ 'urgency', 'next_expiry', 'activities' ],
+}
+
+VIEWS = {
+    'all': {
+        'sort_by': ['ticker'],
+        'fieldgroups': [ 'base', 'company', 'position', 'scores' ],
     },
-    {
-        'configurations': [
-            { 'title': 'tax', 'sort_by': ['ticker'] }
-        ],
-        'fields': [
-            'ticker',
-            'equity',
-            'price', 'quantity',
-            'cusq', 'cusv', 'culq', 'culv',
-            'crsq', 'crsv', 'crlq', 'crlv',
-            'premium_collected', 'dividends_collected',
-            'trd0',
-        ],
+    'perf': {
+        'sort_by': ['ticker'],
+        'fieldgroups': [ 'base', 'position', 'scores', 'strends', 'ltrends' ],
     },
-]
+    'active': {
+        'sort_by': ['urgency'],
+        'filter_by': 'next_expiry',
+        'fieldgroups': [ 'base', 'position', 'scores', 'options' ],
+    },
+    'expiring': {
+        'sort_by': ['urgency'],
+        'filter_by': 'soon_expiring',
+        'fieldgroups': [ 'base', 'position', 'scores', 'options' ],
+    },
+    'urgent': {
+        'sort_by': ['next_expiry'],
+        'filter_by': 'urgent',
+        'fieldgroups': [ 'base', 'position', 'scores', 'options' ],
+    },
+}
 
 FILTERS = {
     None: lambda row: True,
@@ -76,14 +79,12 @@ FILTERS = {
 }
 
 _VIEWS = {}
-for cfg in VIEWS:
-    columns = cfg['fields']
-    for view in cfg['configurations']:
-        _VIEWS[view['title']] = dict(
-            sort_by=view.get('sort_by', ['ticker']),
-            filter_by=FILTERS[view.get('filter_by', None)],
-            columns=columns,
-        )
+for view, configuration in VIEWS.items():
+    _VIEWS[view] = dict(
+        sort_by=configuration.get('sort_by', ['ticker']),
+        filter_by=FILTERS[configuration.get('filter_by', None)],
+        columns=[f for fg in configuration['fieldgroups'] for f in FIELD_GROUPS[fg]]
+    )
 
 @cli.command(help='Refresh Data')
 @click.pass_context
