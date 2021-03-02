@@ -33,7 +33,7 @@ CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 VIEWS = [
     {
         'configurations': [
-            { 'title': 'all', 'sort_by': ['change'] },
+            { 'title': 'all', 'sort_by': ['ticker'] },
             { 'title': 'active', 'sort_by': ['urgency'], 'filter_by': 'next_expiry' },
             { 'title': 'expiring', 'sort_by': ['urgency'], 'filter_by': 'soon_expiring' },
             { 'title': 'urgent', 'sort_by': ['next_expiry'], 'filter_by': 'urgent' },
@@ -112,7 +112,7 @@ def refresh(ctx):
         util.output.prtable(table)
         print(util.debug.measurements())
 
-        time.sleep(60)
+        time.sleep(100)
 
 
 @cli.command(help='Views')

@@ -181,6 +181,7 @@ def _overview(ticker):
 #    overview = _overview(ticker)
 #    return overview['Sector'] if overview is not None else 'N/A'
 
+@cachier.cachier(stale_after=datetime.timedelta(days=100))
 def industry(ticker):
     overview = _overview(ticker)
     return overview['Industry'] if overview is not None else 'N/A'
