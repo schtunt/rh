@@ -23,7 +23,7 @@ import account
 import constants
 
 
-from util.numbers import D, Z
+from util.numbers import F
 
 def relmod():
     importlib.reload(rh)
@@ -65,13 +65,3 @@ print()
 print("Meta-helpers for this REPL")
 print(" + relmod()               (Reload wthout having to exit the repl)")
 print(" + datatypes(df)          (Schema check on Pandas DataFrame (specifically for S and T))")
-
-datatypes = lambda df=S: {
-    column: set(map(type, df[column])) for column in df.columns
-}
-
-nullrows = lambda df=S: S[S.isnull().any(axis=1)]
-def shownans(df=S, index='ticker'):
-    '''Returns a table showing only rows and columns that contain NaNs'''
-    df = df.set_index(index)
-    return df.loc[:, df.isna().any()][df.isna().any(axis=1)]

@@ -7,15 +7,15 @@ from progress.bar import ShadyBar
 
 import slurp
 import util
-from util.numbers import D
+from util.numbers import F
 
-ANNUAL_TRADING_DAYS = D(365*5/7 -6 -3*5/7)
+ANNUAL_TRADING_DAYS = F(365*5/7 -6 -3*5/7)
 
 def risk_free_rate_of_return():
     '''
     TODO: Make this dynamic
     '''
-    return D(0.02)
+    return F(0.02)
 
 
 def treynor(ticker, beta):
@@ -26,7 +26,7 @@ def treynor(ticker, beta):
 
     adj_close_price = slurp.stock_historic_prices(ticker)['Adj Close']
     daily_returns = adj_close_price.pct_change()
-    returns_mean = D(np.mean(daily_returns))
+    returns_mean = F(np.mean(daily_returns))
     variance = daily_returns.cov(daily_returns)   # AKA ~np.var(daily_returns)
     volatility = beta                             # AKA correlation to S&P500/Other Index, Risk
 
@@ -56,9 +56,9 @@ def _sharpe_on_ticker(ticker):
 
     adj_close_price = slurp.stock_historic_prices(ticker)['Adj Close']
     daily_returns = adj_close_price.pct_change()
-    returns_mean = D(np.mean(daily_returns))
+    returns_mean = F(np.mean(daily_returns))
     variance = daily_returns.cov(daily_returns)   # AKA ~np.var(daily_returns)
-    volatility = D(np.sqrt(variance))             # AKA Standard Deviation, AKA Risk
+    volatility = F(np.sqrt(variance))             # AKA Standard Deviation, AKA Risk
 
     sharpe = util.numbers.NaN
     if volatility:
@@ -76,7 +76,7 @@ def _sharpe_on_holdings(holdings):
     with ShadyBar('%32s' % 'Pulling Historic Quote Prices', max=len(holdings)) as bar:
         for ticker, datum in holdings.items():
             df[ticker] = slurp.stock_historic_prices(ticker)['Adj Close']
-            equities[ticker] = D(datum['equity'])
+            equities[ticker] = F(datum['equity'])
             bar.next()
 
     # Calculate the current weight of each stock in the portfolio

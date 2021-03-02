@@ -8,7 +8,7 @@ from . import debug
 from beautifultable import BeautifulTable
 
 import fields
-from util.numbers import D, Z
+from util.numbers import F
 
 class progress:
     def __init__(self, data, title=None, force=True):

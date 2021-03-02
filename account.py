@@ -7,7 +7,7 @@ import pandas as pd
 import scipy.stats
 
 import util
-from util.numbers import D
+from util.numbers import F
 
 
 class Account:
@@ -33,10 +33,10 @@ class Account:
         )
 
         profile = api.rh.build_user_profile()
-        self._equity = D(profile['equity'])
-        self._extended_hours_equity = D(profile['extended_hours_equity'])
-        self._cash = D(profile['cash'])
-        self._dividends_total = D(profile['dividend_total'])
+        self._equity = F(profile['equity'])
+        self._extended_hours_equity = F(profile['extended_hours_equity'])
+        self._cash = F(profile['cash'])
+        self._dividends_total = F(profile['dividend_total'])
 
     def underlying(self, ticker):
         return self._portfolio[ticker]

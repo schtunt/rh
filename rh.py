@@ -15,7 +15,7 @@ import fields
 import account
 
 import util
-from util.numbers import D, Z
+from util.numbers import F
 
 upper = lambda l: list(map(lambda s: s.upper(), l))
 csv_list_flatten = lambda csvl: [token for csv in csvl for token in csv.split(',')]

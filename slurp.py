@@ -14,7 +14,7 @@ import util
 import events
 import fields
 
-from util.numbers import D, Z, NaN
+from util.numbers import F, NaN
 
 FEATHER_BASE='/tmp'
 def feathers():
@@ -98,9 +98,9 @@ def transactions():
         header = pd.read_csv(imported, comment='#', nrows=0).columns
         df = pd.read_csv(imported, comment='#', converters=dict(
             date=util.datetime.dtp.parse,
-            fees=D,
-            quantity=D,
-            average_price=D,
+            fees=F,
+            quantity=F,
+            average_price=F,
         ))
         bar.next()
 
@@ -115,7 +115,7 @@ def transactions():
                             date=se['updated_at'],
                             order_type=se['type'],
                             side=ec['side'],
-                            fees=Z,
+                            fees=0,
                             quantity=ec['quantity'],
                             average_price=ec['price'],
                         ), ignore_index=True
@@ -138,7 +138,7 @@ def transactions():
             data = cbtally[row.symbol]
 
             signum = {'buy':-1, 'sell':+1}[row.side]
-            datum = ['trade', D(signum) * D(row.quantity), D(row.average_price), row.date]
+            datum = ['trade', F(signum) * F(row.quantity), F(row.average_price), row.date]
 
             if len(data) > 0:
                 _,_,_,d0 = data[-1]
@@ -150,10 +150,10 @@ def transactions():
                         continue
 
                     for existing in data:
-                        existing[1] *= D(split['toFactor'])
-                        existing[1] /= D(split['fromFactor'])
-                        existing[2] *= D(split['fromFactor'])
-                        existing[2] /= D(split['toFactor'])
+                        existing[1] *= F(split['toFactor'])
+                        existing[1] /= F(split['fromFactor'])
+                        existing[2] *= F(split['fromFactor'])
+                        existing[2] /= F(split['toFactor'])
 
             data.append(datum)
             _,_,price,_ = datum
@@ -163,11 +163,11 @@ def transactions():
             held   = bought - sold
 
             return pd.Series([
-                D(bought), D(sold), D(held), D(
+                F(bought), F(sold), F(held), F(
                     (
                         sum(qty * pps for cls,qty,pps,date in data) + held * price
                     )/bought
-                ) if bought > 0 else Z
+                ) if bought > 0 else 0
             ])
 
         # 6. Cost Basis
@@ -220,7 +220,7 @@ def _stock_orders():
         orders[ticker].append("%s %s x%s @%s" % (
             order['type'],
             order['side'],
-            util.color.qty(order['quantity'], Z),
+            util.color.qty(order['quantity'], 0),
             util.color.mulla(order['price']),
         ))
 
@@ -283,8 +283,8 @@ def _pull_processed_holdings_data(portfolio, T):
 
             _opened = '\n'.join(opened.get(ticker, []))
             _closed = '\n'.join(closed.get(ticker, []))
-            _collateral = D(collaterals[ticker]['call'])
-            _optionable = (D(holding['quantity']) - _collateral) // 100
+            _collateral = F(collaterals[ticker]['call'])
+            _optionable = (F(holding['quantity']) - _collateral) // 100
             activities_data = []
             if _opened: activities_data.append(_opened)
             if _closed: activities_data.append(_closed)
@@ -304,7 +304,7 @@ def _pull_processed_holdings_data(portfolio, T):
             row = dict(
                 ticker=ticker,
                 price=api.price(ticker),
-                pcp=D(quote['previousClose']),
+                pcp=F(quote['previousClose']),
                 beta=api.beta(ticker),
                 quantity=holding['quantity'],
                 average_buy_price=holding['average_buy_price'],
@@ -326,9 +326,9 @@ def _pull_processed_holdings_data(portfolio, T):
                 culq=culq,
                 culv=culv,
                 premium_collected=premium,
-                dividends_collected=sum(D(div['amount']) for div in dividend),
-                collateral_call=D(collateral['call']),
-                collateral_put=D(collateral['put']),
+                dividends_collected=sum(F(div['amount']) for div in dividend),
+                collateral_call=F(collateral['call']),
+                collateral_put=F(collateral['put']),
                 ttl=ttl,
                 urgency=urgencies[ticker],
                 activities=activities,
@@ -353,67 +353,62 @@ def stocks(transactions, portfolio, portfolio_is_complete):
             portfolio
         )
 
-    df = None
+    S = None
     if cache_exists:
-        df = pd.read_parquet(feather)
+        S = pd.read_parquet(feather)
         if portfolio_is_complete:
-            return df
+            return S
 
     data = _pull_processed_holdings_data(portfolio, transactions)
 
     # 8. Field Extensions
     with ShadyBar('%48s' % 'Refreshing Extended DataFrame and Cache', max=2) as bar:
         util.debug.mstart('FieldExtensions')
-        # NOTE: This will modify df (if it's not None) in-place.  If that ever changes, the
-        # following commented-out logic must be used:
-        #    df.set_index('ticker', inplace=True)
-        #    df.update(flds.extended.set_index('ticker'))
-        #    df.reset_index(inplace=True)
-        flds = fields.Fields(data, transactions, df=df)
-        if df is None:
-            df = flds.extended
+        # Note that if S is not None, the following line will mutate it
+        flds = fields.Fields(data, T=transactions, S=S)
+        S = flds.extended
 
         util.debug.mstop('FieldExtensions')
         bar.next()
 
         if 'test' not in feather:
             # Emergency Sanitization
-            #for column in df.columns:
-            #    df[column] = df[column].map(lambda n: D(n) if type(n) in (str, float, int) else n)
+            #for column in S.columns:
+            #    S[column] = S[column].map(lambda n: F(n) if type(n) in (str, float, int) else n)
             try:
-                df.to_parquet(feather, index=False)
+                S.to_parquet(feather, index=False)
             except:
                 print("Amended DataFrame can't be dumped")
                 util.debug.ddump({
-                    column:str(set(map(type, df[column]))) for column in df.columns
+                    column:str(set(map(type, S[column]))) for column in S.columns
                 }, force=True)
                 raise
         bar.next()
 
-    return df
+    return S
 
 
 def _option_positions(prices):
     next_expiries = {}
     data = api.positions('options', 'all')
-    collaterals = defaultdict(lambda: {'put': Z, 'call': Z})
+    collaterals = defaultdict(lambda: {'put': 0, 'call': 0})
     opened = defaultdict(list)
-    urgencies = defaultdict(D)
-    for option in [o for o in data if D(o['quantity']) != Z]:
+    urgencies = defaultdict(F)
+    for option in [o for o in data if F(o['quantity']) != 0]:
         ticker = option['chain_symbol']
-        price = D(prices[ticker])
+        price = F(prices[ticker])
 
         uri = option['option']
         instrument = api.instrument(uri)
 
-        premium = Z
+        premium = 0
         if instrument['state'] != 'queued':
-            premium -= D(option['quantity']) * D(option['average_price'])
+            premium -= F(option['quantity']) * F(option['average_price'])
 
         itype = instrument['type']
         otype = option['type']
 
-        s_k_ratio = price / D(instrument['strike_price'])
+        s_k_ratio = price / F(instrument['strike_price'])
         urgencies[ticker] = max((
             urgencies[ticker],
             util.color.wtm_urgency(s_k_ratio, otype, itype)
@@ -423,7 +418,7 @@ def _option_positions(prices):
             instrument['state'],
             util.color.otype(otype),
             util.color.itype(itype),
-            util.color.qty(option['quantity'], Z),
+            util.color.qty(option['quantity'], 0),
             util.color.mulla(premium),
             util.color.mulla(instrument['strike_price']),
             instrument['expiration_date'],
@@ -435,7 +430,7 @@ def _option_positions(prices):
         else:
             next_expiries[ticker] = min(next_expiries[ticker], expiry)
 
-        collaterals[ticker][itype] += 100 * D(dict(
+        collaterals[ticker][itype] += 100 * F(dict(
             put=instrument['strike_price'],
             call=option['quantity']
         )[itype])
@@ -449,7 +444,7 @@ def _option_positions(prices):
 
 def _option_orders():
     closed = defaultdict(list)
-    premiums = defaultdict(lambda: Z)
+    premiums = defaultdict(lambda: 0)
     data = api.orders('options', 'all')
     for option in [o for o in data if o['state'] not in ('cancelled')]:
         ticker = option['chain_symbol']
@@ -464,7 +459,7 @@ def _option_orders():
             strategies.append('c[%s]' % ' '.join(tokens))
 
         legs = []
-        premium = Z
+        premium = 0
         for leg in option['legs']:
             uri = leg['option']
             instrument = api.instrument(uri)
@@ -477,7 +472,7 @@ def _option_orders():
             ))
 
             premium += sum([
-                100 * D(x['price']) * D(x['quantity']) for x in leg['executions']
+                100 * F(x['price']) * F(x['quantity']) for x in leg['executions']
             ])
 
         premium *= -1 if option['direction'] == 'debit' else +1
@@ -487,7 +482,7 @@ def _option_orders():
             option['state'],
             option['type'],
             '/'.join(strategies),
-            util.color.qty(option['quantity'], Z),
+            util.color.qty(option['quantity'], 0),
             util.color.mulla(premium),
             util.color.mulla(instrument['strike_price']),
         ))

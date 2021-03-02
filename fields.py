@@ -6,6 +6,7 @@ import numpy as np
 import datetime
 
 import typing
+import decimal
 import dataclasses
 
 from functools import reduce
@@ -15,9 +16,16 @@ from collections import OrderedDict
 import api
 import util
 import models
-from util.numbers import NaN, D, Z
+from util.numbers import NaN, F
 from util.datetime import NaT
 
+def xxx(args):
+    print('#'*80 + ' START')
+    print()
+    util.debug.ddump(args, force=True)
+    print()
+    print('#'*80 + ' END')
+    return args
 
 @dataclasses.dataclass
 class FieldComplexConstructor:
@@ -36,15 +44,15 @@ class Field:
 # Field Pullcast (Data Type / Typecasting) -={
 _PULLCAST = dict(
     ticker=str,
-    price=D, pcp=D, quantity=D, average_buy_price=D, equity=D, percent_change=D,
-    equity_change=D,
-    percentage=D,
+    price=F, pcp=F, quantity=F, average_buy_price=F, equity=F, percent_change=F,
+    equity_change=F,
+    percentage=F,
     type=str, name=str,
-    cnt=D, trd=D, qty=D,
-    crsq=D, crsv=D, crlq=D, crlv=D, cusq=D, cusv=D, culq=D, culv=D,
-    collateral_call=D, collateral_put=D,
+    cnt=F, trd=F, qty=F,
+    crsq=F, crsv=F, crlq=F, crlv=F, cusq=F, cusv=F, culq=F, culv=F,
+    collateral_call=F, collateral_put=F,
     next_expiry=util.datetime.datetime,
-    ttl=D, urgency=D, activities=str,
+    ttl=F, urgency=F, activities=str,
 )
 # }=-
 # Field Pushcast (Data Presentation / Formating) -={
@@ -92,7 +100,7 @@ def _extensions(T, S):
         Field(
             name='roic',
             getter=api.roic,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='ROIC',
             documentation='https://www.investopedia.com/terms/r/returnoninvestmentcapital.asp',
@@ -100,7 +108,7 @@ def _extensions(T, S):
         Field(
             name='ebt',
             getter=api.ebt,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='EBT',
             documentation='https://www.investopedia.com/terms/e/ebt.asp',
@@ -108,7 +116,7 @@ def _extensions(T, S):
         Field(
             name='ebit',
             getter=api.ebit,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='EBIT',
             documentation='https://www.investopedia.com/terms/e/ebit.asp',
@@ -116,7 +124,7 @@ def _extensions(T, S):
         Field(
             name='ebitda',
             getter=api.ebitda,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='EBITDA',
             documentation='https://www.investopedia.com/terms/e/ebitda.asp',
@@ -124,7 +132,7 @@ def _extensions(T, S):
         Field(
             name='p2e',
             getter=lambda ticker: api.price(ticker, ratio='p2e'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='P/E Ratio',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
@@ -132,7 +140,7 @@ def _extensions(T, S):
         Field(
             name='p2b',
             getter=lambda ticker: api.price(ticker, ratio='p2b'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='P/B Ratio',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
@@ -140,7 +148,7 @@ def _extensions(T, S):
         Field(
             name='p2s',
             getter=lambda ticker: api.price(ticker, ratio='p2s'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='P/S Ratio',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
@@ -148,7 +156,7 @@ def _extensions(T, S):
         Field(
             name='peg',
             getter=lambda ticker: api.price(ticker, ratio='peg'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='PEG Ratio',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
@@ -172,7 +180,7 @@ def _extensions(T, S):
         Field(
             name='ev',
             getter=api.ev,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.mulla,
             description='Enterprise Value',
             documentation='https://www.investopedia.com/ask/answers/111414/whats-difference-between-enterprise-value-and-market-capitalization.asp',
@@ -180,7 +188,7 @@ def _extensions(T, S):
         Field(
             name='so',
             getter=api.shares_outstanding,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.qty0,
             description='Shares Outstanding',
             documentation='https://www.investopedia.com/terms/o/outstandingshares.asp',
@@ -188,7 +196,7 @@ def _extensions(T, S):
         Field(
             name='marketcap',
             getter=api.marketcap,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.mulla,
             description='Market Capitalization',
             documentation='https://www.investopedia.com/terms/m/marketcapitalization.asp',
@@ -196,7 +204,7 @@ def _extensions(T, S):
         Field(
             name='beta',
             getter=api.beta,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.qty,
             description='Beta',
             documentation='https://www.investopedia.com/terms/b/beta.asp',
@@ -204,7 +212,7 @@ def _extensions(T, S):
         Field(
             name='premium_collected',
             getter=None,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.mulla,
             description='Options Premium Collected',
             documentation='',
@@ -212,7 +220,7 @@ def _extensions(T, S):
         Field(
             name='dividends_collected',
             getter=None,
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.mulla,
             description='Stock Dividends Collected',
             documentation='',
@@ -220,7 +228,7 @@ def _extensions(T, S):
         Field(
             name='d50ma',
             getter=lambda ticker: api.ma(ticker, 'd50ma'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.mulla,
             description='50-Day Moving Average',
             documentation='',
@@ -228,7 +236,7 @@ def _extensions(T, S):
         Field(
             name='d200ma',
             getter=lambda ticker: api.ma(ticker, 'd200ma'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.mulla,
             description='200-Day Moving Average',
             documentation='',
@@ -236,7 +244,7 @@ def _extensions(T, S):
         Field(
             name='y5cp',
             getter=lambda ticker: api.cp(ticker, 'y5cp'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='5-Year Percentage Change',
             documentation='',
@@ -244,15 +252,15 @@ def _extensions(T, S):
         Field(
             name='y2cp',
             getter=lambda ticker: api.cp(ticker, 'y2cp'),
-            pullcast=D,
-            pushcast=D,
+            pullcast=F,
+            pushcast=F,
             description='2-Year Percentage Change',
             documentation='',
         ),
         Field(
             name='y1cp',
             getter=lambda ticker: api.cp(ticker, 'y1cp'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='1-Year Percentage Change',
             documentation='',
@@ -260,7 +268,7 @@ def _extensions(T, S):
         Field(
             name='m6cp',
             getter=lambda ticker: api.cp(ticker, 'm6cp'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='6-Month Percentage Change',
             documentation='',
@@ -268,7 +276,7 @@ def _extensions(T, S):
         Field(
             name='m3cp',
             getter=lambda ticker: api.cp(ticker, 'm3cp'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='3-Month Percentage Change',
             documentation='',
@@ -276,7 +284,7 @@ def _extensions(T, S):
         Field(
             name='m1cp',
             getter=lambda ticker: api.cp(ticker, 'm1cp'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='1-Month Percentage Change',
             documentation='',
@@ -284,7 +292,7 @@ def _extensions(T, S):
         Field(
             name='d30cp',
             getter=lambda ticker: api.cp(ticker, 'd30cp'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='30-Day Percentage Change',
             documentation='',
@@ -292,7 +300,7 @@ def _extensions(T, S):
         Field(
             name='d5cp',
             getter=lambda ticker: api.cp(ticker, 'd5cp'),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='5-Day Percentage Change',
             documentation='',
@@ -300,7 +308,7 @@ def _extensions(T, S):
         Field(
             name='change',
             getter=lambda ticker: api.quote(ticker)['changePercent'],
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='Change Percent',
             documentation='',
@@ -316,7 +324,7 @@ def _extensions(T, S):
                     lambda R: util.numbers.growth_score(R),
                 ),
             ),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.qty,
             description='Moving Average',
             documentation='',
@@ -331,7 +339,7 @@ def _extensions(T, S):
                     lambda R: T[T['symbol']==R['ticker']]['cbps'].values[-1],
                 )
             ),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.mulla,
             description='Cost-Basis per Share (Excluding Option Premiums and Dividends',
             documentation='https://www.investopedia.com/terms/c/costbasis.asp',
@@ -348,7 +356,7 @@ def _extensions(T, S):
                     ),
                 )
             ),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='Cost-Basis per Share (as a percentage of share price)',
             documentation='https://www.investopedia.com/terms/c/costbasis.asp',
@@ -373,28 +381,17 @@ def _extensions(T, S):
             name='momentum',
             getter=FieldComplexConstructor(
                 attributes=(
-                    'ticker',
                     'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp',
                 ),
                 chain=(
-                    lambda R: { R.pop('ticker'): {
-                        ticker: np.float(decimal) for ticker, decimal in R.items()}
-                    },
                     lambda R: [
-                        sp.stats.percentileofscore(
-                            S[[
-                                'y5cp', 'y2cp', 'y1cp',
-                                'm6cp', 'm3cp', 'm1cp',
-                                'd30cp', 'd5cp'
-                            ]].fillna(S.mean(numeric_only=True))[period].to_numpy(),
-                            pd.to_numeric(percentile, errors='coerce'),
-                        ) for ticker, percentiles in R.items()
-                        for period, percentile in percentiles.items()
+                        sp.stats.percentileofscore(S[period], value)
+                        for period, value in R.items()
                     ],
-                    statistics.mean,
+                    statistics.mean
                 )
             ),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='Momentum Percentile (compared to the rest of this Portfolio)',
             documentation='',
@@ -409,7 +406,7 @@ def _extensions(T, S):
                     lambda R: models.sharpe(ticker=R['ticker']),
                 )
             ),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='Sharpe Ratio',
             documentation='https://www.investopedia.com/terms/s/sharperatio.asp',
@@ -424,7 +421,7 @@ def _extensions(T, S):
                     lambda R: models.treynor(R['ticker'], R['beta']),
                 )
             ),
-            pullcast=D,
+            pullcast=F,
             pushcast=util.color.pct,
             description='Treynor Ratio',
             documentation='https://www.investopedia.com/terms/t/treynorratio.asp',
@@ -450,12 +447,11 @@ def _typecasters():
     '''
 
     typecasters = dict(_PULLCAST.items())
-    typecasters.update(
-        {
-            field.name: field.pullcast for field in _extensions(None, None)
-                if field.getter is None
-        }
-    )
+    typecasters.update({
+        field.name: field.pullcast
+        for field in _extensions(None, None)
+        if field.getter is None
+    })
     return defaultdict(lambda: str, typecasters)
 
 def _extend(S, field, prioritize_missing):
@@ -474,13 +470,14 @@ def _extend(S, field, prioritize_missing):
                 elif prioritize_missing and S[field.name] in (None, NaN, NaT, 'N/A'):
                     series.append(cast(figet(ticker, ignore_cache=True)))
                 elif not prioritize_missing: # i.e., no priority at all, do all tickers
-                    series.append(cast(figet(ticker, ignore_cache=True)))
+                    #series.append(cast(figet(ticker, ignore_cache=True)))
+                    series.append(cast(figet(ticker)))
                 else:
-                    # TODO: Add age to everu row, this final block will refresh based on age
+                    # TODO: Add age to every row, this final block will refresh based on age
                     pass
             S[field.name] = series
         else:
-            S[field.name] = pd.Series(list(
+            S[field.name] = pd.Series((
                 reduce(
                     lambda g, f: f(g),
                     figet.chain + (field.pullcast,),
@@ -500,7 +497,7 @@ def _extend(S, field, prioritize_missing):
 
 
 class Fields:
-    def __init__(self, data, T, df=None):
+    def __init__(self, data, T, S=None):
         # Some APIs (free ones) will limit requests.  To make this useable, if the user has
         # requested only a handful of tickers in their query, then to to hit the API unlit
         # throttled.  Otherwise, prioritize missing ticker data over old ticker data, to avoid
@@ -510,12 +507,10 @@ class Fields:
         tickers_requested = len(data)
         prioritize_missing = tickers_requested > 5
 
-
-        # Create new DataFrame first.  This DataFrame will be limited to the list
-        # of tickers supplied by the user, if any, otherwise as inclusive as the
-        # stored all-stock DataFrame.
+        # 1. Create new DataFrame first.  This DataFrame will be limited to the list of tickers
+        # supplied by the user, if any, otherwise as inclusive as the stored DataFrame.
         typecasts = _typecasters()
-        S = pd.DataFrame(
+        df = pd.DataFrame(
             map(
                 lambda row: map(
                     lambda typecast: typecast[1](row[typecast[0]]),
@@ -525,21 +520,26 @@ class Fields:
             columns=typecasts.keys()
         )
 
-        # Extend fields/columns
+        # 2. Update the stored DataFrame `df' with the fresh data in `S'
+        if S is not None:
+            S.set_index('ticker', inplace=True)
+            S.update(df.set_index('ticker'))
+            S.reset_index(inplace=True)
+        else:
+            S = df
+
+        # 3. Replace all `NaN's with corresponding column means.
+        means = S[S.keys()].mean(skipna=True, numeric_only=True)
+        S.fillna(means, inplace=True)
+
+        # 4. Extend fields (add new columns)
         for field in _extensions(T, S):
             _extend(S, field, prioritize_missing)
 
-        # Sort the DataFrame by Ticker
+        # 5. Sort the DataFrame by Ticker
         S.sort_values(by='ticker', inplace=True)
 
-        if df is not None:
-            df.set_index('ticker', inplace=True)
-            df.update(S.set_index('ticker'))
-            df.reset_index(inplace=True)
-            self._S = df
-        else:
-            self._S = S
-
+        self._S = S
 
     @property
     def extended(self):

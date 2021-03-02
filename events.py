@@ -1,5 +1,5 @@
 import util
-from util.numbers import D, Z
+from util.numbers import F
 
 class Event:
     ident = 0
@@ -40,7 +40,7 @@ class TransactionEvent(Event):
         else:
             self.side = 'buy'
             self._quantity = fulfillment_buy
-            self._price = Z
+            self._price = 0
             self.timestamp = util.datetime.parse('2020-01-01')
             self.otype = 'free'
 
@@ -118,8 +118,8 @@ class StockSplitEvent(Event):
         super().__init__(stock)
 
         self.timestamp = util.datetime.parse(date)
-        self.multiplier = D(multiplier)
-        self.divisor = D(divisor)
+        self.multiplier = F(multiplier)
+        self.divisor = F(divisor)
 
     def __repr__(self):
         rstr = '%s#%05d %-32s -- stock-split %s:%s' % (

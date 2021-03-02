@@ -6,17 +6,23 @@ import scipy as sp
 def preinitialize():
     decimal.getcontext().prec = 20
 
-Z = decimal.Decimal('0')
+NaN = float('nan')
+isnan = lambda n: np.isnan(n) if type(n) is float else True
 
-NaN = decimal.Decimal('NaN')
-dec = lambda n: decimal.Decimal(str(n)) if n is not None else NaN
-def D(*args):
-    if len(args) == 0: return Z
-    try: return dec(args[0])
-    except: return NaN
+flt = lambda n: F(n) if n is not None else NaN
 
-std = lambda n: dec(np.std(n))
-mean = lambda n: dec(np.mean(n))
+#NaN = decimal.Decimal('NaN')
+#Z = decimal.Decimal('0')
+#dec = lambda n: decimal.Decimal(str(n)) if n is not None else NaN
+#def D(*args):
+#    if len(args) == 0: return Z
+#    try: return flt(args[0])
+#    except: return NaN
+
+F = np.float64
+
+std = lambda n: flt(np.std(n))
+mean = lambda n: flt(np.mean(n))
 ident = lambda n: n
 rnd = lambda a, r: round(a / r) * r
 sgn = lambda n: -1 if n <= 0 else 1
@@ -26,9 +32,7 @@ scale_and_shift = lambda p, x: (p*x+1)/2
 
 # An increasing sequence will have a score of zero, and the further from that the series is,
 # the worse the score will be.  Worst case is a reverse-sorted sequence.
-growth_score = lambda series: sum(
-    map(
-        lambda n: (dec(n[0]) - dec(n[1])) ** 2,
-        zip(series, sorted(series))
-    )
-).sqrt()
+growth_score = lambda series: np.sqrt(sum(map(
+    lambda n: (flt(n[0]) - flt(n[1])) ** 2,
+    zip(series, sorted(series))
+)))

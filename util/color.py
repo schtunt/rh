@@ -5,7 +5,7 @@ from termcolor import colored
 import colorhash as ch
 import stringcolor as sc
 
-from .numbers import D, NaN
+from .numbers import F, isnan, NaN
 
 colhash = lambda s, h=None: sc.cs(s, f'rgb{ch.ColorHash(h if h else s).rgb}')
 colhashbold = lambda s, h=None: colhash(s, h).bold()
@@ -13,11 +13,11 @@ colhashwrap = lambda s: '\n'.join(
     map(lambda t: colhash(t, s).render(), s.replace('-', ' ').split(' '))
 )
 
-from util.numbers import D
+from util.numbers import F
 
 def colorize(f, n, d, v):
     c = d[0]
-    if not n.is_nan():
+    if not isnan(n):
         for i, v in enumerate(v):
             if v < n:
                 c = d[i+1]
@@ -26,17 +26,17 @@ def colorize(f, n, d, v):
 
 # Percentage
 spc = ['red', 'yellow', 'green', 'cyan', 'magenta']
-pct   = lambda p: colorize(lambda n: '%0.2f%%' % n, D(p), spc, [D(0), D(50), D(65), D(80)])
+pct   = lambda p: colorize(lambda n: '%0.2f%%' % n, F(p), spc, [F(0), F(50), F(65), F(80)])
 mpct  = lambda p: pct(100*p)
 
 spcr  = ['blue', 'cyan', 'green', 'yellow', 'red']
-pctr  = lambda p: colorize(lambda n: '%0.2f%%' % n, D(p), spcr, [D(0), D(50), D(65), D(80)])
+pctr  = lambda p: colorize(lambda n: '%0.2f%%' % n, F(p), spcr, [F(0), F(50), F(65), F(80)])
 mpctr = lambda p: pctr(100*p)
 
 # Quantity
 def _qty(m):
-    m = D(m)
-    if m.is_nan():
+    m = F(m)
+    if isnan(m):
         return NaN, None
 
     if abs(m) < 1000:
@@ -64,20 +64,20 @@ def _qty(m):
 
 qty  = lambda q, dp=2: colorize(
     lambda n: ('{:,.%df}' % dp).format(n),
-    D(q),
+    F(q),
     ['yellow', 'cyan'],
-    [D(0)]
+    [F(0)]
 )
 qty1 = lambda q: qty(q, 1)
 
 def qty0(q):
-    s, c = _qty(D(q))
-    return colored(s, 'red') if s is NaN else colored(s, c)
+    s, c = _qty(F(q))
+    return colored(s, 'red') if isnan(s) else colored(s, c)
 
 def mulla(m):
-    m = D(m)
+    m = F(m)
     s, c = _qty(m)
-    return colored(m, 'red') if s is NaN else colored(('+$%s' if m > 0 else '-$%s') % s, c)
+    return colored(m, 'red') if isnan(s) else colored(('+$%s' if m > 0 else '-$%s') % s, c)
 
 
 RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -128,7 +128,7 @@ def _wtm(s_k_ratio, otype, itype):
     '''
 
     keys = ['DITM', 'ITM', 'ATM', 'OTM', 'WOTM']
-    thresholds = [ D(0.75), D(0.95), D(1/0.95), D(1/0.75) ]
+    thresholds = [ F(0.75), F(0.95), F(1/0.95), F(1/0.75) ]
 
     index = 0
     for i, limit in enumerate(thresholds):
@@ -166,14 +166,14 @@ def _wtm(s_k_ratio, otype, itype):
 
     # how likely it is that this contract will not expire worthless, and that it will
     # be assigned if seller, and hold intrinsic value if buyer
-    impact = [ D(0.40), D(0.7), D(1), D(1.3), D(1.6) ]
+    impact = [ F(0.40), F(0.7), F(1), F(1.3), F(1.6) ]
     urgency = {
-        'put': D(1) / D(s_k_ratio) * impact[len(thresholds) - index],
-        'call': D(s_k_ratio) * impact[index],
+        'put': F(1) / F(s_k_ratio) * impact[len(thresholds) - index],
+        'call': F(s_k_ratio) * impact[index],
     }[itype]
     urgency = {
         'short': urgency,
-        'long': D(1)/urgency,
+        'long': F(1)/urgency,
     }[otype]
 
 

@@ -10,7 +10,7 @@ from collections import defaultdict
 from functools import reduce
 
 import util
-from util.numbers import D, Z, NaN
+from util.numbers import F, NaN
 
 import cachier
 import hashlib
@@ -351,7 +351,7 @@ def fundamentals(ticker):
     return FUNDAMENTALS[ticker]
 
 def float(ticker):
-    return D(fundamentals(ticker)['float'])
+    return F(fundamentals(ticker)['float'])
 
 # }=-
 
@@ -400,13 +400,13 @@ def _prices_last_year_agg():
     prices = pdr.data.DataReader(
         symbols, data_source='yahoo', start=when, end=when
     )['Adj Close'].values[0]
-    return dict(zip(symbols(), map(D, prices)))
+    return dict(zip(symbols(), map(F, prices)))
 _prices_last_year = lambda ticker: _prices_last_year_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @util.debug.measure
-def _price_agg(): return { t: D(p) for t, p in _iex_aggregator('get_price').items() }
+def _price_agg(): return { t: F(p) for t, p in _iex_aggregator('get_price').items() }
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=1))
@@ -455,7 +455,7 @@ def ebitda(ticker):
     Used to measure the cash flow of a business.
     '''
     key = 'EBITDA'
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def ebit(ticker):
     '''
@@ -469,7 +469,7 @@ def ebit(ticker):
 
     key = 'ebit'
     f = financials(ticker)
-    return NaN if f is None else D(f[key])
+    return NaN if f is None else F(f[key])
 
 def ebt(ticker):
     '''
@@ -486,38 +486,38 @@ def dividends_paid(ticker):
     '''
     key = 'dividendsPaid'
     f = financials(ticker)
-    return NaN if f is None else D(f[key])
+    return NaN if f is None else F(f[key])
 
 def income(ticker):
     key = 'netIncome'
     f = financials(ticker)
-    return NaN if f is None else D(f[key])
+    return NaN if f is None else F(f[key])
 
 def liabilities(ticker):
     key = 'totalLiabilities'
-    return D(financials(ticker)[key])
+    return F(financials(ticker)[key])
     f = financials(ticker)
-    return NaN if f is None else D(f[key])
+    return NaN if f is None else F(f[key])
 
 def debt(ticker):
     key = 'totalDebt'
     f = financials(ticker)
-    return NaN if f is None else D(f[key])
+    return NaN if f is None else F(f[key])
 
 def assets(ticker):
     key = 'totalAssets'
     f = financials(ticker)
-    return NaN if f is None else D(f[key])
+    return NaN if f is None else F(f[key])
 
 def cash(ticker):
     key = 'totalCash'
     f = financials(ticker)
-    return NaN if f is None else D(f[key])
+    return NaN if f is None else F(f[key])
 
 def equity(ticker):
     key = 'shareholderEquity'
     f = financials(ticker)
-    return NaN if f is None else D(f[key])
+    return NaN if f is None else F(f[key])
 
 def roc(ticker):
     '''
@@ -540,19 +540,19 @@ def roic(ticker):
     )
 
 def av(ticker, av):
-    return D(stats(ticker)[dict(
+    return F(stats(ticker)[dict(
         a10v='avg10Volume',
         a30v='avg30Volume',
     )[av]])
 
 def ma(ticker, ma):
-    return D(stats(ticker)[dict(
+    return F(stats(ticker)[dict(
         d200ma='day200MovingAvg',
         d50ma='day50MovingAvg',
     )[ma]])
 
 def cp(ticker, cp):
-    return D(stats(ticker)[dict(
+    return F(stats(ticker)[dict(
         y5cp='year5ChangePercent',
         y2cp='year2ChangePercent',
         y1cp='year1ChangePercent',
@@ -566,21 +566,21 @@ def cp(ticker, cp):
 
 def beta(ticker):
     key = 'beta'
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def shares_outstanding(ticker):
     key = 'sharesOutstanding'
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def cash(ticker, total=True):
     if total: key = 'totalCash'
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def debt(ticker, ratio=None):
     if ratio is None: key = 'currentDebt'
     else: key = 'debtToEquity'
 
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def revenue(ticker, total=False, per=None):
     assert per is None or total is False
@@ -590,15 +590,15 @@ def revenue(ticker, total=False, per=None):
     elif total: key = 'totalRevenue'
     else: key = 'revenue'
 
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def marketcap(ticker):
     key = 'marketcap'
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def profit_margin(ticker):
     key = 'profitMargin'
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def price(ticker, ratio=None):
     if ratio is None: return _price_agg()[ticker]
@@ -607,7 +607,7 @@ def price(ticker, ratio=None):
     elif ratio == 'p2s': key = 'priceToSales'
     elif ratio == 'p2b': key = 'priceToBook'
 
-    return D(stats(ticker)[key])
+    return F(stats(ticker)[key])
 
 def ev(ticker, ratio=None):
     '''
@@ -632,7 +632,7 @@ def ev(ticker, ratio=None):
         numerator = 'EBIT'
 
     s = stats(ticker)
-    return D(s[numerator]) / D(
+    return F(s[numerator]) / F(
         1 if denominator is None else s[denominator]
     )
 

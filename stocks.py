@@ -2,7 +2,7 @@ from collections import defaultdict
 from functools import reduce
 
 import util
-from util.numbers import D, Z
+from util.numbers import F
 
 import cachier
 import datetime
@@ -61,7 +61,7 @@ class Stock:
 
     @property
     def marketcap(self):
-        return D(api.marketcap(self.ticker))
+        return F(api.marketcap(self.ticker))
 
     @property
     def sector(self):
@@ -74,7 +74,7 @@ class Stock:
     @property
     def intrades(self):
         return {
-            t['transactionDate']: D(t['transactionShares'])
+            t['transactionDate']: F(t['transactionShares'])
             for t in api.insider_transactions(self.ticker)
         }
 
@@ -84,7 +84,7 @@ class Stock:
 
     @property
     def beta(self):
-        return D(api.beta(self.ticker))
+        return F(api.beta(self.ticker))
 
     @property
     def news(self):
@@ -121,9 +121,9 @@ class Stock:
 
 
         data = {
-            'buy':  { 'risk': Z, 'mean': Z, 'std': Z },
-            'sell': { 'risk': Z, 'mean': Z, 'std': Z },
-            'hold': { 'risk': Z, 'mean': Z, 'std': Z },
+            'buy':  { 'risk': 0, 'mean': 0, 'std': 0 },
+            'sell': { 'risk': 0, 'mean': 0, 'std': 0 },
+            'hold': { 'risk': 0, 'mean': 0, 'std': 0 },
         }
 
         ss = util.numbers.growth_score
@@ -152,17 +152,17 @@ class Stock:
         data = [e for ee in map(lambda e: e['classifications'], result) for e in ee]
 
         def l(e, ee):
-             e[ee['tag_name']] += D(ee['confidence'])
+             e[ee['tag_name']] += F(ee['confidence'])
              return e
 
         # aggregate the remaining serntiment data
-        aggregate = reduce(l, data, defaultdict(lambda: Z))
+        aggregate = reduce(l, data, defaultdict(lambda: 0))
         total = sum(aggregate.values())
 
         sentiments = {
-            'Positive': Z,
-            'Negative': Z,
-            'Neutral':  Z,
+            'Positive': 0,
+            'Negative': 0,
+            'Neutral':  0,
         }
 
         sentiments.update({
@@ -190,7 +190,7 @@ class Stock:
 
     @property
     def price(self):
-        return D(api.price(self.ticker))
+        return F(api.price(self.ticker))
 
     @property
     def timestamp(self):
@@ -259,8 +259,8 @@ class Stock:
         '''
 
         costbasis = {
-            'short': { 'qty': Z, 'value': Z },
-            'long':  { 'qty': Z, 'value': Z },
+            'short': { 'qty': 0, 'value': 0 },
+            'long':  { 'qty': 0, 'value': 0 },
         }
 
         if realized:
@@ -298,7 +298,7 @@ class Stock:
                 else:
                     self._quantity += event.quantity()
                 self.events.append(event)
-            elif type(event) is events.StockSplitEvent and self._quantity != Z:
+            elif type(event) is events.StockSplitEvent and self._quantity != 0:
                 self._quantity = event.forward(self._quantity)
                 self.events.append(event)
 
@@ -356,7 +356,7 @@ class Stock:
         realized = self.costbasis(realized=True, when=when)
         unrealized = self.costbasis(realized=False, when=when)
 
-        value, qty = Z, Z
+        value, qty = 0, 0
         for costbasis in (realized, unrealized):
             for term in ('short', 'long'):
                 value += costbasis[term]['value']
@@ -364,7 +364,7 @@ class Stock:
 
         if dividends:
             divs = api.dividends()[self.ticker]
-            value += sum(D(div['amount']) for div in divs)
+            value += sum(F(div['amount']) for div in divs)
 
         if premiums:
             value += self.account.positions['premiums'][self.ticker]
@@ -380,10 +380,10 @@ class Stock:
         #    ],
         #    'value': value,
         #    'qty': qty,
-        #    'cbps': value / qty if qty > Z else Z
+        #    'cbps': value / qty if qty > 0 else 0
         #}, force=True)
 
-        return value / qty if qty > Z else Z
+        return value / qty if qty > 0 else 0
 
     def traded(self, when=None):
         return sum(map(lambda buy: buy.quantity(when=when), self.buys))
