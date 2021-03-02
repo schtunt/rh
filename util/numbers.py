@@ -7,7 +7,11 @@ def preinitialize():
     decimal.getcontext().prec = 20
 
 NaN = float('nan')
-isnan = lambda n: np.isnan(n) if type(n) is float else True
+def isnan(n):
+    try:
+        return np.isnan(np.float64(n))
+    except:
+        return True
 
 flt = lambda n: F(n) if n is not None else NaN
 

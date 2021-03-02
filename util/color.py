@@ -72,12 +72,12 @@ qty1 = lambda q: qty(q, 1)
 
 def qty0(q):
     s, c = _qty(F(q))
-    return colored(s, 'red') if isnan(s) else colored(s, c)
+    return colored(s, c)
 
 def mulla(m):
     m = F(m)
     s, c = _qty(m)
-    return colored(m, 'red') if isnan(s) else colored(('+$%s' if m > 0 else '-$%s') % s, c)
+    return colored(('+$%s' if m > 0 else '-$%s') % s, c)
 
 
 RE_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')

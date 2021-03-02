@@ -36,7 +36,7 @@ class FieldComplexConstructor:
 class Field:
     name: typing.AnyStr             # Field name
     getter: FieldComplexConstructor # Getter function, or otherwise, a FieldComplexConstructor
-    pullcast:  typing.Callable      # How to typecast the pulled data at inress
+    pullcast: typing.Callable       # How to typecast the pulled data at inress
     pushcast: typing.Callable       # How to format the output data at presentation
     description: str                # Description of the field/column
     documentation: str              # URL to Investopedia describing the field
@@ -49,7 +49,6 @@ _PULLCAST = dict(
     percentage=F,
     type=str, name=str,
     cnt=F, trd=F, qty=F,
-    crsq=F, crsv=F, crlq=F, crlv=F, cusq=F, cusv=F, culq=F, culv=F,
     collateral_call=F, collateral_put=F,
     next_expiry=util.datetime.datetime,
     ttl=F, urgency=F, activities=str,
@@ -58,10 +57,6 @@ _PULLCAST = dict(
 # Field Pushcast (Data Presentation / Formating) -={
 _PUSHCAST = {
     'ticker': lambda t: util.color.colhashbold(t, t[0]),
-    #'since_open': util.color.mpct,
-    #'since_close': util.color.mpct,
-    #'CC.Coll': util.color.qty0,           # Covered Call Collateral
-    #'CSP.Coll': util.color.mulla,         # Cash-Secured Put Collateral
     'price': util.color.mulla,
     'pcp': util.color.mulla,               # Previous Close Price (PCP)
     'quantity': util.color.qty0,
@@ -72,18 +67,6 @@ _PUSHCAST = {
     'percentage': util.color.pct,
     'delta': util.color.qty,
     'short': util.color.qty1,
-    'cuq': util.color.qty,
-    'cuv': util.color.mulla,
-    'crq': util.color.qty,
-    'crv': util.color.mulla,
-    'cusq': util.color.qty,
-    'cusv': util.color.mulla,
-    'culq': util.color.qty,
-    'culv': util.color.mulla,
-    'crsq': util.color.qty,
-    'crsv': util.color.mulla,
-    'crlq': util.color.qty,
-    'crlv': util.color.mulla,
     'urgency': util.color.mpctr,
     'next_expiry': lambda d: util.color.qty(util.datetime.ttl(d)),
 }
@@ -336,7 +319,8 @@ def _extensions(T, S):
                     'ticker',
                 ),
                 chain=(
-                    lambda R: T[T['symbol']==R['ticker']]['cbps'].values[-1],
+                    lambda R: T[T['symbol']==R['ticker']],
+                    lambda df: df['cbps'].values[-1],
                 )
             ),
             pullcast=F,
@@ -351,7 +335,9 @@ def _extensions(T, S):
                     'ticker',
                 ),
                 chain=(
-                    lambda R: T[T['symbol']==R['ticker']]['cbps'].values[-1] / (
+                    lambda R: (
+                        T[T['symbol']==R['ticker']]['cbps'].values[-1]
+                    ) / (
                         S[S['ticker']==R['ticker']].price.item()
                     ),
                 )

@@ -1,5 +1,4 @@
 import os
-import datetime
 
 import pandas_datareader as pdr
 import pandas as pd
@@ -8,19 +7,20 @@ from collections import defaultdict
 
 from progress.bar import ShadyBar
 
-import constants
 import api
 import util
-import events
 import fields
 
 from util.numbers import F, NaN
 
-FEATHER_BASE='/tmp'
+FEATHER_BASE = '/tmp'
+
+
 def feathers():
     return [
         featherfile(base) for base in ('transactions', 'stocks')
     ]
+
 
 def featherfile(base, ticker=None):
     featherbase = {
@@ -29,8 +29,7 @@ def featherfile(base, ticker=None):
     }[base]
 
     if ticker is None:
-        featherfile = f'{featherbase}.feather'
-        return featherfile
+        return f'{featherbase}.feather'
 
     if not os.path.exists(featherbase):
         os.mkdir(featherbase)
@@ -39,9 +38,9 @@ def featherfile(base, ticker=None):
 
 
 def update(column, data):
-    '''
+    """
     data: dict() keyed by ticker
-    '''
+    """
     feather = featherfile('stocks')
     if not os.path.exists(feather):
         return False
@@ -55,21 +54,19 @@ def update(column, data):
 
 
 def stock_historic_prices(ticker, years=7):
-    '''
+    """
     Historic Stock Prices
 
-    '''
+    """
     feather = featherfile('stocks', ticker)
     if os.path.exists(feather):
         df = pd.read_parquet(feather)
         return df
 
     tNow = util.datetime.now()
-    today = util.datetime.short(tNow)
 
     # Start 7 years from today
-    tm7y = tNow - 7 * util.datetime.timedelta(days=365)
-    yesteryear = util.datetime.short(tm7y)
+    tm7y = tNow - years * util.datetime.timedelta(days=365)
 
     df = pdr.data.DataReader(ticker, data_source='yahoo', start=tm7y, end=tNow)
     df.to_parquet(feather)
@@ -78,14 +75,14 @@ def stock_historic_prices(ticker, years=7):
 
 
 def transactions():
-    '''
+    """
     DataFrame Update 1 - Stock information pulled from Robinhood CSV
 
     DataFrame Update 2 - Options information pulled from Robinhood
-    '''
+    """
 
     symbols = api.symbols(remove='expired')
-    with ShadyBar('%48s' % 'Building Transactions', max=len(symbols)+6) as bar:
+    with ShadyBar('%48s' % 'Building Transactions', max=len(symbols) + 6) as bar:
         # 1. Download Stock Transactions from Robinhood...
         feather = featherfile('transactions')
         imported = '/tmp/.cached/stocks.csv'
@@ -131,18 +128,19 @@ def transactions():
         bar.next()
 
         cbtally = defaultdict(list)
+
         def _costbasis(row):
             if api.blacklisted(row.symbol, full=True):
                 return pd.Series([NaN, NaN, NaN, NaN])
 
             data = cbtally[row.symbol]
 
-            signum = {'buy':-1, 'sell':+1}[row.side]
+            signum = {'buy': -1, 'sell': +1}[row.side]
             datum = ['trade', F(signum) * F(row.quantity), F(row.average_price), row.date]
 
             if len(data) > 0:
-                _,_,_,d0 = data[-1]
-                _,_,_,d2 = datum
+                _, _, _, d0 = data[-1]
+                _, _, _, d2 = datum
                 splits = api.splits(row.symbol)
                 for split in splits:
                     d1 = util.datetime.parse(split['exDate'])
@@ -156,17 +154,17 @@ def transactions():
                         existing[2] /= F(split['toFactor'])
 
             data.append(datum)
-            _,_,price,_ = datum
+            _, _, price, _ = datum
 
-            bought = -sum(qty for cls,qty,pps,date in data if qty < 0)
-            sold   = +sum(qty for cls,qty,pps,date in data if qty > 0)
-            held   = bought - sold
+            bought = -sum(qty for cls, qty, pps, date in data if qty < 0)
+            sold = +sum(qty for cls, qty, pps, date in data if qty > 0)
+            held = bought - sold
 
             return pd.Series([
                 F(bought), F(sold), F(held), F(
                     (
-                        sum(qty * pps for cls,qty,pps,date in data) + held * price
-                    )/bought
+                            sum(qty * pps for cls, qty, pps, date in data) + held * price
+                    ) / bought
                 ) if bought > 0 else 0
             ])
 
@@ -180,35 +178,6 @@ def transactions():
         bar.next()
 
     return df
-
-
-def _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(df, portfolio):
-    '''
-    Create local Python Stock objects, and links between them, and their corresponding
-    Lots and LotConnectors
-
-    DataFrame Update 3 - Ledger Data
-    '''
-    with ShadyBar('%48s' % 'Reading Robinhood Transactions History', max=len(df)) as bar:
-        for i, dfrow in df.iterrows():
-            # The DataFrame was created from transactions (export downloaded from Robinhood.
-            # That means it will contain some symbols no longer in service, which we call
-            # tockers.  It's necessary then, to attribute these old-symbol transactions to their
-            # new ticker symbol.
-            tocker = dfrow.symbol
-            ticker = api.tocker2ticker(tocker)
-
-            # If we no longer hold this symbol, we skip this iteration of the loop
-            if ticker not in portfolio:
-                bar.next()
-                continue
-
-            stock = portfolio[ticker]
-            transaction = events.TransactionEvent(stock, dfrow)
-            for key, val in stock.ledger(transaction).items():
-                dfrow[key] = val
-
-            bar.next()
 
 
 def _stock_orders():
@@ -226,11 +195,12 @@ def _stock_orders():
 
     return stocks,
 
-def _pull_processed_holdings_data(portfolio, T):
+
+def _pull_processed_holdings_data(portfolio):
     now = util.datetime.now()
     data = []
 
-    with ShadyBar('%48s' % 'Refreshing Robinhood Portfolio Data', max=len(portfolio)+5) as bar:
+    with ShadyBar('%48s' % 'Refreshing Robinhood Portfolio Data', max=len(portfolio) + 5) as bar:
         # 1. Pull holdings
         holdings = api.holdings()
         bar.next()
@@ -252,7 +222,7 @@ def _pull_processed_holdings_data(portfolio, T):
         bar.next()
 
         # 4. Pull Stock Orders (blob)
-        stock_orders = _stock_orders()
+        #stock_orders = _stock_orders()
         bar.next()
 
         # 5. Pull Dividends data
@@ -268,18 +238,6 @@ def _pull_processed_holdings_data(portfolio, T):
                 continue
 
             holding = holdings[ticker]
-
-            cbr = stock.costbasis(realized=True, when=now)
-            crsq = cbr['short']['qty']
-            crsv = cbr['short']['value']
-            crlq = cbr['long']['qty']
-            crlv = cbr['long']['value']
-
-            cbu = stock.costbasis(realized=False, when=now)
-            cusq = cbu['short']['qty']
-            cusv = cbu['short']['value']
-            culq = cbu['long']['qty']
-            culv = cbu['long']['value']
 
             _opened = '\n'.join(opened.get(ticker, []))
             _closed = '\n'.join(closed.get(ticker, []))
@@ -298,7 +256,7 @@ def _pull_processed_holdings_data(portfolio, T):
             dividend = dividends[ticker]
             next_expiry = next_expiries.get(ticker, pd.NaT)
             ttl = util.datetime.delta(now, next_expiry).days if next_expiry else -1
-            fundamentals = api.fundamentals(ticker)
+            #fundamentals = api.fundamentals(ticker)
             quote = api.quote(ticker)
 
             row = dict(
@@ -317,14 +275,6 @@ def _pull_processed_holdings_data(portfolio, T):
                 cnt=len(stock.events),
                 trd=stock.traded(),
                 qty=stock._quantity,
-                crsq=crsq,
-                crsv=crsv,
-                crlq=crlq,
-                crlv=crlv,
-                cusq=cusq,
-                cusv=cusv,
-                culq=culq,
-                culv=culv,
                 premium_collected=premium,
                 dividends_collected=sum(F(div['amount']) for div in dividend),
                 collateral_call=F(collateral['call']),
@@ -339,19 +289,13 @@ def _pull_processed_holdings_data(portfolio, T):
     return data
 
 
-def stocks(transactions, portfolio, portfolio_is_complete):
-    '''
+def stocks(T, portfolio, portfolio_is_complete):
+    """
     DataFrame Update 4 - Addtional columns added here from Stock Object calls or other APIs
-    '''
+    """
 
     feather = featherfile('stocks')
     cache_exists = os.path.exists(feather)
-
-    if not (portfolio_is_complete and cache_exists):
-        _create_and_link_python_stock_objects_and_slurp_ledger_to_dataframe(
-            transactions,
-            portfolio
-        )
 
     S = None
     if cache_exists:
@@ -359,13 +303,13 @@ def stocks(transactions, portfolio, portfolio_is_complete):
         if portfolio_is_complete:
             return S
 
-    data = _pull_processed_holdings_data(portfolio, transactions)
+    data = _pull_processed_holdings_data(portfolio)
 
     # 8. Field Extensions
     with ShadyBar('%48s' % 'Refreshing Extended DataFrame and Cache', max=2) as bar:
         util.debug.mstart('FieldExtensions')
         # Note that if S is not None, the following line will mutate it
-        flds = fields.Fields(data, T=transactions, S=S)
+        flds = fields.Fields(data, T=T, S=S)
         S = flds.extended
 
         util.debug.mstop('FieldExtensions')
@@ -373,14 +317,14 @@ def stocks(transactions, portfolio, portfolio_is_complete):
 
         if 'test' not in feather:
             # Emergency Sanitization
-            #for column in S.columns:
+            # for column in S.columns:
             #    S[column] = S[column].map(lambda n: F(n) if type(n) in (str, float, int) else n)
             try:
                 S.to_parquet(feather, index=False)
             except:
                 print("Amended DataFrame can't be dumped")
                 util.debug.ddump({
-                    column:str(set(map(type, S[column]))) for column in S.columns
+                    column: str(set(map(type, S[column]))) for column in S.columns
                 }, force=True)
                 raise
         bar.next()
@@ -442,11 +386,12 @@ def _option_positions(prices):
         opened=opened,
     )
 
+
 def _option_orders():
     closed = defaultdict(list)
     premiums = defaultdict(lambda: 0)
     data = api.orders('options', 'all')
-    for option in [o for o in data if o['state'] not in ('cancelled')]:
+    for option in [o for o in data if o['state'] not in ('cancelled',)]:
         ticker = option['chain_symbol']
 
         strategies = []
@@ -460,6 +405,7 @@ def _option_orders():
 
         legs = []
         premium = 0
+        last_leg_strike_price = 0
         for leg in option['legs']:
             uri = leg['option']
             instrument = api.instrument(uri)
@@ -475,6 +421,8 @@ def _option_orders():
                 100 * F(x['price']) * F(x['quantity']) for x in leg['executions']
             ])
 
+            last_leg_strike_price = instrument['strike_price']
+
         premium *= -1 if option['direction'] == 'debit' else +1
         premiums[ticker] += premium
 
@@ -484,7 +432,7 @@ def _option_orders():
             '/'.join(strategies),
             util.color.qty(option['quantity'], 0),
             util.color.mulla(premium),
-            util.color.mulla(instrument['strike_price']),
+            util.color.mulla(last_leg_strike_price),
         ))
 
         for l in legs:
