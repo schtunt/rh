@@ -297,19 +297,19 @@ def _extensions(T, S):
             documentation='',
         ),
         Field(
-            name='ma',
+            name='malps%',
             getter=FieldComplexConstructor(
                 attributes=(
                     'd200ma', 'd50ma', 'price',
                 ),
                 chain=(
-                    lambda R: R.values(),
-                    lambda R: util.numbers.growth_score(R),
+                    lambda R: list(R.values()),
+                    lambda R: -util.numbers.growth_score(R) / R[-1],
                 ),
             ),
             pullcast=F,
-            pushcast=util.color.qty,
-            description='Moving Average',
+            pushcast=util.color.mpct,
+            description='Moving average loss per dollar of share',
             documentation='',
         ),
         Field(
@@ -343,9 +343,73 @@ def _extensions(T, S):
                 )
             ),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='Cost-Basis per Share (as a percentage of share price)',
             documentation='https://www.investopedia.com/terms/c/costbasis.asp',
+        ),
+        Field(
+            name='dyps%',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'ticker',
+                ),
+                chain=(
+                    lambda R: R['ticker'],
+                    lambda ticker: dict(
+                        price=np.mean((
+                            api.ma(ticker, ma='d200ma'),
+                            api.ma(ticker, ma='d50ma'),
+                            api.price(ticker),
+                        )),
+                        divs=list(zip(*(
+                            (F(div['amount']), F(div['position']))
+                            for div in api.dividends(ticker)
+                        ))),
+                    ),
+                    lambda d: sum(
+                        d['divs'][0] # dividend amount
+                    ) / sum(
+                        d['divs'][1] # number of stocks held at time of dividend payout
+                    ) / (
+                        d['price'] # recency-weighted average of share price
+                    ) if len(d['divs']) > 0 else 0,
+                )
+            ),
+            pullcast=F,
+            pushcast=util.color.mpct,
+            description='Dividend yield per dollar of share price',
+            documentation='...',
+        ),
+        Field(
+            name='pcps%',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'ticker',
+                ),
+                chain=(
+                    lambda R: R['ticker'],
+                    lambda ticker: dict(
+                        price=np.mean((
+                            api.ma(ticker, ma='d200ma'),
+                            api.ma(ticker, ma='d50ma'),
+                            api.price(ticker),
+                        )),
+                        premcol=S[S['ticker']==ticker]['premium_collected'],
+                        bought=T[T['symbol']==ticker]['bought'].tail(1).item(),
+                    ),
+                    lambda d: (
+                        d['premcol'] # premium collected in total
+                    ) / (
+                        d['bought'] # number of shares ever purchased
+                    ) / (
+                        d['price'] # recency-weighted average of share price
+                    )
+                )
+            ),
+            pullcast=F,
+            pushcast=util.color.mpct,
+            description='Premium collected per dollar of share price ever purchased',
+            documentation='...',
         ),
         Field(
             name='trd0',
@@ -368,6 +432,25 @@ def _extensions(T, S):
             getter=FieldComplexConstructor(
                 attributes=(
                     'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp',
+                ),
+                chain=(
+                    lambda R: [
+                        sp.stats.percentileofscore(S[period], value)
+                        for period, value in R.items()
+                    ],
+                    statistics.mean
+                )
+            ),
+            pullcast=F,
+            pushcast=util.color.pct,
+            description='Momentum Percentile (compared to the rest of this Portfolio)',
+            documentation='',
+        ),
+        Field(
+            name='score%',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'cbps%', 'dyps%', 'pcps%', 'malps%',  'momentum',
                 ),
                 chain=(
                     lambda R: [

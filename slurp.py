@@ -200,7 +200,7 @@ def _pull_processed_holdings_data(portfolio):
     now = util.datetime.now()
     data = []
 
-    with ShadyBar('%48s' % 'Refreshing Robinhood Portfolio Data', max=len(portfolio) + 5) as bar:
+    with ShadyBar('%48s' % 'Refreshing Robinhood Portfolio Data', max=len(portfolio) + 3) as bar:
         # 1. Pull holdings
         holdings = api.holdings()
         bar.next()
@@ -221,15 +221,7 @@ def _pull_processed_holdings_data(portfolio):
         del _data
         bar.next()
 
-        # 4. Pull Stock Orders (blob)
-        #stock_orders = _stock_orders()
-        bar.next()
-
-        # 5. Pull Dividends data
-        dividends = api.dividends()
-        bar.next()
-
-        # 6. Add all rows to Python list first
+        # 4. Add all rows to Python list first
         _timers = {}
         for ticker, stock in portfolio.items():
             bar.next()
@@ -253,7 +245,7 @@ def _pull_processed_holdings_data(portfolio):
 
             collateral = collaterals[ticker]
             premium = premiums[ticker]
-            dividend = dividends[ticker]
+            dividend = api.dividends(ticker)
             next_expiry = next_expiries.get(ticker, pd.NaT)
             ttl = util.datetime.delta(now, next_expiry).days if next_expiry else -1
             #fundamentals = api.fundamentals(ticker)
@@ -300,8 +292,8 @@ def stocks(T, portfolio, portfolio_is_complete):
     S = None
     if cache_exists:
         S = pd.read_parquet(feather)
-        if portfolio_is_complete:
-            return S
+        #if portfolio_is_complete:
+        #    return S
 
     data = _pull_processed_holdings_data(portfolio)
 
@@ -339,7 +331,8 @@ def _option_positions(prices):
     opened = defaultdict(list)
     urgencies = defaultdict(F)
     for option in [o for o in data if F(o['quantity']) != 0]:
-        ticker = option['chain_symbol']
+        tocker = option['chain_symbol']
+        ticker = api.tocker2ticker(tocker)
         price = F(prices[ticker])
 
         uri = option['option']

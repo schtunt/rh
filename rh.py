@@ -40,7 +40,7 @@ FIELD_GROUPS = {
     'daytrader': [ 'pcp', 'change' ],
     'ratios': [ 'p2e', 'p2b', 'p2s', 'peg' ],
     'ratios-ii': [ 'beta', 'sharpe', 'treynor' ],
-    'scores': [ 'momentum', 'ma', 'cbps', 'cbps%' ],
+    'scores': [ 'score%', 'cbps', 'cbps%', 'dyps%', 'pcps%', 'malps%', 'momentum' ],
     'options': [ 'urgency', 'next_expiry', 'activities' ],
 }
 

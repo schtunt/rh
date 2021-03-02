@@ -38,6 +38,7 @@ TICKER_CHAIN.update({
     'STLA': ( 'FCAU', ),
     'SIRI': ( 'P', ),
     'AABAZZ': ( 'AABA', ),
+    'MDC': ( 'MDC1', ),
 })
 
 def blacklist(full=False):
@@ -52,8 +53,9 @@ def blacklist(full=False):
 
     blacklist |= set(
         reduce(
-            operator.or_,
-            (TICKER_CHAIN.get(ticker, set()) for ticker in blacklist)
+            operator.or_, (
+                set(TICKER_CHAIN.get(ticker, ())) for ticker in blacklist
+            )
         )
     )
 
@@ -286,9 +288,9 @@ def instrument(url):
     return rh.stocks.get_instrument_by_url(url)
 
 
-@cachier.cachier(stale_after=datetime.timedelta(weeks=1))
+@cachier.cachier(stale_after=datetime.timedelta(days=1))
 @util.debug.measure
-def dividends():
+def _dividends_agg():
     dividends = defaultdict(list)
     for datum in rh.account.get_dividends():
         uri = datum['instrument']
@@ -296,6 +298,9 @@ def dividends():
         dividends[ticker].append(datum)
     return dividends
 
+def dividends(ticker):
+    dividends = _dividends_agg()
+    return dividends[ticker]
 
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @util.debug.measure

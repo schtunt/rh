@@ -79,14 +79,6 @@ class Stock:
         return F(api.beta(self.ticker))
 
     @property
-    def news(self):
-        return [
-                   '. '.join((blb['preview_text'], blb['title'])) for blb in api.news(self.ticker, 'rh')
-               ] + [
-                   '. '.join([blb['headline'], blb['summary']]) for blb in api.news(self.ticker, 'iex')
-               ]
-
-    @property
     def ttm(self):
         return dict(
             eps=self.stats['ttmEPS'],
