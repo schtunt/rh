@@ -292,20 +292,19 @@ def stocks(T, portfolio, portfolio_is_complete):
     S = None
     if cache_exists:
         S = pd.read_parquet(feather)
-        #if portfolio_is_complete:
-        #    return S
+        if portfolio_is_complete:
+            return S
 
     data = _pull_processed_holdings_data(portfolio)
 
     # 8. Field Extensions
-    with ShadyBar('%48s' % 'Refreshing Extended DataFrame and Cache', max=2) as bar:
-        util.debug.mstart('FieldExtensions')
-        # Note that if S is not None, the following line will mutate it
-        flds = fields.Fields(data, T=T, S=S)
-        S = flds.extended
-
-        util.debug.mstop('FieldExtensions')
-        bar.next()
+    flds = fields.Fields(data)
+    S = flds.refreshed(S)
+    extensions = flds.extensions(S, T)
+    with ShadyBar('%48s' % 'Refreshing Extended DataFrame and Cache', max=len(extensions)+2) as bar:
+        for field in extensions:
+            flds.extend(field, S, T)
+            bar.next()
 
         if 'test' not in feather:
             # Emergency Sanitization
@@ -319,6 +318,9 @@ def stocks(T, portfolio, portfolio_is_complete):
                     column: str(set(map(type, S[column]))) for column in S.columns
                 }, force=True)
                 raise
+        bar.next()
+
+        flds.sort(S)
         bar.next()
 
     return S

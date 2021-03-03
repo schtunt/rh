@@ -19,13 +19,13 @@ import models
 from util.numbers import NaN, F
 from util.datetime import NaT
 
-def xxx(args):
+def xxx(args, ret=None):
     print('#'*80 + ' START')
     print()
     util.debug.ddump(args, force=True)
     print()
     print('#'*80 + ' END')
-    return args
+    return args if ret is None else ret
 
 @dataclasses.dataclass
 class FieldComplexConstructor:
@@ -78,7 +78,31 @@ _PUSHCAST = {
 # *_change - total return ppercent/equity
 # type - stock or adr
 
-def _extensions(T, S):
+'''
+ROIC =
+    Net Operating Profits After Tax (NOPAT) / Invested Capital
+
+Invested Capital =
+    + Total Assets less Cash
+    - Short-Term Investments
+    - Long-Term Investments
+    - Non-Interest Bearing Current Liabilities
+
+NOPAT =
+    + Reported Net Income
+    - Investment and Interest Income
+    - Tax Shield from Interest Expenses (effective tax rate x interest expense)
+    + Goodwill Amortization
+    + Non-Recurring Costs plus Interest Expenses
+    + Tax Paid on Investments and Interest Income (effective tax rate x investment income)
+
+https://www.investopedia.com/articles/fundamental/03/050603.asp
+
+IEX Provides: https://iexcloud.io/docs/api/ -> New Constructs Reported Fundamentals Data
+
+'''
+
+def _extensions(S, T):
     return [
         Field(
             name='roic',
@@ -92,7 +116,7 @@ def _extensions(T, S):
             name='ebt',
             getter=api.ebt,
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mulla,
             description='EBT',
             documentation='https://www.investopedia.com/terms/e/ebt.asp',
         ),
@@ -100,7 +124,7 @@ def _extensions(T, S):
             name='ebit',
             getter=api.ebit,
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mulla,
             description='EBIT',
             documentation='https://www.investopedia.com/terms/e/ebit.asp',
         ),
@@ -108,7 +132,7 @@ def _extensions(T, S):
             name='ebitda',
             getter=api.ebitda,
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mulla,
             description='EBITDA',
             documentation='https://www.investopedia.com/terms/e/ebitda.asp',
         ),
@@ -165,7 +189,7 @@ def _extensions(T, S):
             getter=api.ev,
             pullcast=F,
             pushcast=util.color.mulla,
-            description='Enterprise Value',
+            description='Enterprise Value; the market value plus the net interest-bearing debt',
             documentation='https://www.investopedia.com/ask/answers/111414/whats-difference-between-enterprise-value-and-market-capitalization.asp',
         ),
         Field(
@@ -495,6 +519,21 @@ def _extensions(T, S):
             description='Treynor Ratio',
             documentation='https://www.investopedia.com/terms/t/treynorratio.asp',
         ),
+        Field(
+            name='ebit2ev',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'ebit', 'ev',
+                ),
+                chain=(
+                    lambda R: R['ebit'] / R['ev'],
+                )
+            ),
+            pullcast=F,
+            pushcast=util.color.mpct,
+            description='Earnings yield; what the business earns in relation to its share price',
+            documentation='',
+        ),
      ]
 
 # }=-
@@ -557,12 +596,19 @@ def _extend(S, field):
         raise exception.with_traceback(sys.exc_info()[2])
 
 
+def denan(df):
+    '''Inplace replacement of `NaN's with mean of NaN cell's respective column'''
+    means = df[df.keys()].mean(skipna=True, numeric_only=True)
+    df.fillna(means, inplace=True)
+
 class Fields:
-    def __init__(self, data, T, S=None):
-        # 1. Create new DataFrame first.  This DataFrame will be limited to the list of tickers
-        # supplied by the user, if any, otherwise as inclusive as the stored DataFrame.
+    def __init__(self, data):
+        '''
+        Create new DataFrame first.  This DataFrame will be limited to the list of tickers
+        supplied by the user, if any, otherwise as inclusive as the stored DataFrame.
+        '''
         typecasts = _typecasters()
-        df = pd.DataFrame(
+        self._df = pd.DataFrame(
             map(
                 lambda row: map(
                     lambda typecast: typecast[1](row[typecast[0]]),
@@ -572,27 +618,27 @@ class Fields:
             columns=typecasts.keys()
         )
 
-        # 2. Update the stored DataFrame `df' with the fresh data in `S'
+    def refreshed(self, S):
+        '''
+        Update the stored DataFrame `df' with the fresh data in `S'
+        '''
         if S is not None:
             S.set_index('ticker', inplace=True)
-            S.update(df.set_index('ticker'))
+            S.update(self._df.set_index('ticker'))
             S.reset_index(inplace=True)
         else:
-            S = df
+            S = self._df
 
-        # 3. Replace all `NaN's with corresponding column means.
-        means = S[S.keys()].mean(skipna=True, numeric_only=True)
-        S.fillna(means, inplace=True)
+        return S
 
+    def extensions(self, S, T):
+        return _extensions(S, T)
+
+    def extend(self, field, S, T):
         # 4. Extend fields (add new columns)
-        for field in _extensions(T, S):
-            _extend(S, field)
+        denan(S)
+        _extend(S, field)
 
+    def sort(self, S):
         # 5. Sort the DataFrame by Ticker
         S.sort_values(by='ticker', inplace=True)
-
-        self._S = S
-
-    @property
-    def extended(self):
-        return self._S

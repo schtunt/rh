@@ -2,7 +2,7 @@
 
 source "$(dirname "${0}")/.venv/bin/activate"
 
+echo "$*" > '.venv/tmp/performance.cmd'
 out='.venv/tmp/performance.profile'
-[ -e "${out}" ] || python -m cProfile -o "${out}" rh.py tabulize -v losers
-[ $? -ne 0 ] || runsnake "${out}"
+python -m cProfile -o "${out}" rh.py "$@" && runsnake "${out}"
 exit $?

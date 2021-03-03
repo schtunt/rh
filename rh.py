@@ -32,14 +32,14 @@ CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 
 FIELD_GROUPS = {
     'base': [ 'ticker' ],
-    'company': [ 'sector', 'industry', 'marketcap', 'ev', 'so' ],
+    'company': [ 'sector', 'industry', 'marketcap', 'ev', 'ebit', 'so' ],
     'position': [ 'quantity', 'price', 'equity' ],
     'ltrends': [ 'equity_change', 'percent_change' ],
     'ma': [ 'd200ma', 'd50ma' ],
     'strends': [ 'premium_collected', 'dividends_collected' ],
     'daytrader': [ 'pcp', 'change' ],
     'ratios': [ 'p2e', 'p2b', 'p2s', 'peg' ],
-    'ratios-ii': [ 'beta', 'sharpe', 'treynor' ],
+    'ratios-ii': [ 'beta', 'sharpe', 'treynor', 'ebit2ev' ],
     'scores': [ 'score%', 'cbps', 'cbps%', 'dyps%', 'pcps%', 'malps%', 'momentum' ],
     'options': [ 'urgency', 'next_expiry', 'activities' ],
 }
@@ -47,7 +47,7 @@ FIELD_GROUPS = {
 VIEWS = {
     'all': {
         'sort_by': ['ticker'],
-        'fieldgroups': [ 'base', 'company', 'position', 'scores' ],
+        'fieldgroups': [ 'base', 'company', 'position', 'ratios', 'ratios-ii' ],
     },
     'perf': {
         'sort_by': ['ticker'],

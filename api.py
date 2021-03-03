@@ -371,11 +371,11 @@ def events(ticker):
 # IEX Aggregation -={
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @util.debug.measure
-def _iex_aggregator(fn_name):
+def _iex_aggregator(fn_name, **kwargs):
     agg = dict()
     for chunk in util.chunk(symbols(remove='expired'), 100):
         fn = getattr(iex.Stock(list(chunk)), fn_name)
-        retrieved = fn()
+        retrieved = fn(**kwargs)
         if type(retrieved) is list:
             data = defaultdict(list)
             for datum in retrieved:
@@ -537,7 +537,10 @@ def roic(ticker):
     '''
     Return On Invested Capital
 
-    roic = (net income - dividend) / (debt + equity)
+    roic = Net Operating Profits After Tax (NOPAT) / Invested Capital
+         = (Net Income - Dividend) / (Debt + Equity)
+
+    https://www.investopedia.com/articles/fundamental/03/050603.asp
     '''
     return (
         income(ticker) - dividends_paid(ticker)
@@ -660,10 +663,28 @@ def _quote_agg(): return _iex_aggregator('get_quote')
 quote = lambda ticker: _quote_agg()[ticker]
 
 
-@cachier.cachier(stale_after=datetime.timedelta(days=7))
+@cachier.cachier(stale_after=datetime.timedelta(days=30))
+@util.debug.measure
+def _cash_flow_agg(period='quarter'): return _iex_aggregator('get_cash_flow', period=period)
+cash_flow = lambda ticker, period='quarter': _cash_flow_agg(period=period)[ticker]['cashflow'][0]
+
+
+@cachier.cachier(stale_after=datetime.timedelta(days=30))
+@util.debug.measure
+def _balance_sheet_agg(period='quarter'): return _iex_aggregator('get_balance_sheet', period=period)
+balance_sheet = lambda ticker, period='quarter': _balance_sheet_agg(period=period)[ticker]['balancesheet'][0]
+
+
+@cachier.cachier(stale_after=datetime.timedelta(days=30))
 @util.debug.measure
 def _earnings_agg(): return _iex_aggregator('get_earnings')
-earnings = lambda ticker: _earnings_agg()[ticker]
+earnings = lambda ticker: _earnings_agg()[ticker] # NO_ACCESS
+
+
+@cachier.cachier(stale_after=datetime.timedelta(days=30))
+@util.debug.measure
+def _insider_transactions_agg(): return _iex_aggregator('get_insider_transactions')
+insider_transactions = lambda ticker: _insider_transactions_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
@@ -676,12 +697,6 @@ splits = lambda ticker: _splits_agg().get(ticker, [])
 @util.debug.measure
 def _previous_day_prices_agg(): return _iex_aggregator('get_previous_day_prices')
 previous_day_prices = lambda ticker: _previous_day_prices_agg()[ticker]
-
-
-@cachier.cachier(stale_after=datetime.timedelta(days=4))
-@util.debug.measure
-def _insider_transactions_agg(): return _iex_aggregator('get_insider_transactions')
-insider_transactions = lambda ticker: _insider_transactions_agg()[ticker]
 
 
 # }=-
