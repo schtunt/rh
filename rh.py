@@ -33,14 +33,15 @@ CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 FIELD_GROUPS = {
     'base': [ 'ticker' ],
     'company': [ 'sector', 'industry', 'marketcap', 'ev', 'ebit', 'so' ],
-    'position': [ 'quantity', 'price', 'equity' ],
-    'ltrends': [ 'equity_change', 'percent_change' ],
+    'position': [ 'quantity', 'price', 'equity', 'cbps' ],
     'ma': [ 'd200ma', 'd50ma' ],
+    'ltrends': [ 'equity_change', 'percent_change' ],
     'strends': [ 'premium_collected', 'dividends_collected' ],
-    'daytrader': [ 'pcp', 'change' ],
+    'daytrader': [ 'pcp', 'd1c%', 'd5c%', 'd30c%' ],
     'ratios': [ 'p2e', 'p2b', 'p2s', 'peg' ],
     'ratios-ii': [ 'beta', 'sharpe', 'treynor', 'ebit2ev' ],
-    'scores': [ 'score%', 'cbps', 'cbps%', 'dyps%', 'pcps%', 'malps%', 'momentum' ],
+    'you-score': [ 'you_score%', 'cbps%', 'dyps%', 'pcps%' ],
+    'stock-score': [ 'stock_score%', 'malps%', 'momentum' ],
     'options': [ 'urgency', 'next_expiry', 'activities' ],
 }
 
@@ -51,22 +52,19 @@ VIEWS = {
     },
     'perf': {
         'sort_by': ['ticker'],
-        'fieldgroups': [ 'base', 'position', 'scores', 'strends', 'ltrends' ],
+        'fieldgroups': [
+            'base', 'position', 'you-score', 'stock-score', 'strends', 'ltrends', 'daytrader',
+        ],
     },
-    'active': {
+    'options': {
         'sort_by': ['urgency'],
         'filter_by': 'next_expiry',
-        'fieldgroups': [ 'base', 'position', 'scores', 'options' ],
-    },
-    'expiring': {
-        'sort_by': ['urgency'],
-        'filter_by': 'soon_expiring',
-        'fieldgroups': [ 'base', 'position', 'scores', 'options' ],
+        'fieldgroups': [ 'base', 'position', 'options' ],
     },
     'urgent': {
         'sort_by': ['next_expiry'],
         'filter_by': 'urgent',
-        'fieldgroups': [ 'base', 'position', 'scores', 'options' ],
+        'fieldgroups': [ 'base', 'position', 'options' ],
     },
 }
 

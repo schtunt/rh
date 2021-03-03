@@ -249,75 +249,75 @@ def _extensions(S, T):
             documentation='',
         ),
         Field(
-            name='y5cp',
+            name='y5c%',
             getter=lambda ticker: api.cp(ticker, 'y5cp'),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='5-Year Percentage Change',
             documentation='',
         ),
         Field(
-            name='y2cp',
+            name='y2c%',
             getter=lambda ticker: api.cp(ticker, 'y2cp'),
             pullcast=F,
-            pushcast=F,
+            pushcast=util.color.mpct,
             description='2-Year Percentage Change',
             documentation='',
         ),
         Field(
-            name='y1cp',
+            name='y1c%',
             getter=lambda ticker: api.cp(ticker, 'y1cp'),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='1-Year Percentage Change',
             documentation='',
         ),
         Field(
-            name='m6cp',
+            name='m6c%',
             getter=lambda ticker: api.cp(ticker, 'm6cp'),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='6-Month Percentage Change',
             documentation='',
         ),
         Field(
-            name='m3cp',
+            name='m3c%',
             getter=lambda ticker: api.cp(ticker, 'm3cp'),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='3-Month Percentage Change',
             documentation='',
         ),
         Field(
-            name='m1cp',
+            name='m1c%',
             getter=lambda ticker: api.cp(ticker, 'm1cp'),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='1-Month Percentage Change',
             documentation='',
         ),
         Field(
-            name='d30cp',
+            name='d30c%',
             getter=lambda ticker: api.cp(ticker, 'd30cp'),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='30-Day Percentage Change',
             documentation='',
         ),
         Field(
-            name='d5cp',
+            name='d5c%',
             getter=lambda ticker: api.cp(ticker, 'd5cp'),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='5-Day Percentage Change',
             documentation='',
         ),
         Field(
-            name='change',
+            name='d1c%',
             getter=lambda ticker: api.quote(ticker)['changePercent'],
             pullcast=F,
-            pushcast=util.color.pct,
-            description='Change Percent',
+            pushcast=util.color.mpct,
+            description="Change percent from previous trading day's close",
             documentation='',
         ),
         Field(
@@ -427,7 +427,7 @@ def _extensions(S, T):
                         d['bought'] # number of shares ever purchased
                     ) / (
                         d['price'] # recency-weighted average of share price
-                    )
+                    ),
                 )
             ),
             pullcast=F,
@@ -455,26 +455,27 @@ def _extensions(S, T):
             name='momentum',
             getter=FieldComplexConstructor(
                 attributes=(
-                    'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp',
+                    'y5c%', 'y2c%', 'y1c%', 'm6c%', 'm3c%', 'm1c%', 'd30c%', 'd5c%',
                 ),
                 chain=(
                     lambda R: [
                         sp.stats.percentileofscore(S[period], value)
                         for period, value in R.items()
                     ],
-                    statistics.mean
+                    statistics.mean,
+                    lambda pct: pct / 100.0
                 )
             ),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.mpct,
             description='Momentum Percentile (compared to the rest of this Portfolio)',
             documentation='',
         ),
         Field(
-            name='score%',
+            name='you_score%',
             getter=FieldComplexConstructor(
                 attributes=(
-                    'cbps%', 'dyps%', 'pcps%', 'malps%',  'momentum',
+                    'cbps%', 'dyps%', 'pcps%',
                 ),
                 chain=(
                     lambda R: [
@@ -486,7 +487,23 @@ def _extensions(S, T):
             ),
             pullcast=F,
             pushcast=util.color.pct,
-            description='Momentum Percentile (compared to the rest of this Portfolio)',
+            description='You-Score for owning this stock (how well has the investor done)',
+            documentation='',
+        ),
+        Field(
+            name='stock_score%',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'malps%', 'momentum'
+                ),
+                chain=(
+                    lambda R: R.values(),
+                    sum,
+                )
+            ),
+            pullcast=F,
+            pushcast=util.color.mpct,
+            description='Stock-Score (how well has the stock done)',
             documentation='',
         ),
         Field(

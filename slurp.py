@@ -292,6 +292,7 @@ def stocks(T, portfolio, portfolio_is_complete):
     S = None
     if cache_exists:
         S = pd.read_parquet(feather)
+        # TODO: This needs to be disabled when Fields is updated
         if portfolio_is_complete:
             return S
 

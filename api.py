@@ -699,6 +699,16 @@ def _previous_day_prices_agg(): return _iex_aggregator('get_previous_day_prices'
 previous_day_prices = lambda ticker: _previous_day_prices_agg()[ticker]
 
 
+@cachier.cachier(stale_after=datetime.timedelta(hours=8))
+@util.debug.measure
+def _historical_prices_agg(range='7d', chartCloseOnly=True): return _iex_aggregator(
+    'get_historical_prices', range='7d', chartCloseOnly=True
+)
+historical_prices = lambda ticker, range='7d', chartCloseOnly=True: _historical_prices_agg(
+    range='7d', chartCloseOnly=chartCloseOnly
+)[ticker]
+
+
 # }=-
 # IEX Other -={
 @util.debug.measure

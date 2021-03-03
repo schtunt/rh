@@ -60,7 +60,7 @@ class Account:
                 S[change].to_numpy(),
                 S.loc[S['ticker']==ticker, change].to_numpy(),
             ) for change in (
-                'y5cp', 'y2cp', 'y1cp', 'm6cp', 'm3cp', 'm1cp', 'd30cp', 'd5cp'
+                'y5c%', 'y2c%', 'y1c%', 'm6c%', 'm3c%', 'm1c%', 'd30c%', 'd5c%'
             )
         }
 
