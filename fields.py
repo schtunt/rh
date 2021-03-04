@@ -436,19 +436,35 @@ def _extensions(S, T):
             documentation='...',
         ),
         Field(
-            name='trd0',
+            name='first_traded',
             getter=FieldComplexConstructor(
                 attributes=(
                     'ticker',
                 ),
                 chain=(
                     lambda R: T[T['symbol']==R['ticker']].date,
-                    lambda dates: min(dates) if len(dates) else NaT,
+                    lambda dates: min(dates) if len(dates) else -1,
                 )
             ),
             pullcast=util.datetime.datetime,
             pushcast=lambda d: util.color.qty0(util.datetime.age(d)),
-            description='Day-Zero Trade',
+            description='Days since first trade',
+            documentation='',
+        ),
+        Field(
+            name='last_traded',
+            getter=FieldComplexConstructor(
+                attributes=(
+                    'ticker',
+                ),
+                chain=(
+                    lambda R: T[T['symbol']==R['ticker']].date,
+                    lambda dates: max(dates) if len(dates) else 999,
+                )
+            ),
+            pullcast=util.datetime.datetime,
+            pushcast=lambda d: util.color.qty0(util.datetime.age(d)),
+            description='Days since last trade',
             documentation='',
         ),
         Field(

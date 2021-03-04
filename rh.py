@@ -33,13 +33,13 @@ CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 FIELD_GROUPS = {
     'base': [ 'ticker' ],
     'company': [ 'sector', 'industry', 'marketcap', 'ev', 'ebit', 'so' ],
-    'position': [ 'quantity', 'price', 'equity', 'cbps' ],
+    'position': [ 'quantity', 'price', 'equity', 'percentage', 'cbps' ],
     'ma': [ 'd200ma', 'd50ma' ],
     'ltrends': [ 'equity_change', 'percent_change' ],
     'strends': [ 'premium_collected', 'dividends_collected' ],
-    'daytrader': [ 'pcp', 'd1c%', 'd5c%', 'd30c%' ],
+    'daytrader': [ 'pcp', 'd1c%', 'd5c%', 'd30c%', 'first_traded', 'last_traded' ],
     'ratios': [ 'p2e', 'p2b', 'p2s', 'peg' ],
-    'ratios-ii': [ 'beta', 'sharpe', 'treynor', 'ebit2ev' ],
+    'ratios-ii': [ 'sharpe', 'treynor', 'ebit2ev', 'beta' ],
     'you-score': [ 'you_score%', 'cbps%', 'dyps%', 'pcps%' ],
     'stock-score': [ 'stock_score%', 'malps%', 'momentum' ],
     'options': [ 'urgency', 'next_expiry', 'activities' ],
@@ -53,7 +53,8 @@ VIEWS = {
     'perf': {
         'sort_by': ['ticker'],
         'fieldgroups': [
-            'base', 'position', 'you-score', 'stock-score', 'strends', 'ltrends', 'daytrader',
+            'base', 'position', 'you-score', 'stock-score', 'strends', 'ltrends',
+            'daytrader', 'ratios', 'ratios-ii'
         ],
     },
     'options': {

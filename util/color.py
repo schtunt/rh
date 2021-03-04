@@ -62,17 +62,14 @@ def _qty(m):
             c = compressors[i][1]
     return s, c
 
-qty  = lambda q, dp=2: colorize(
+qty = lambda q, dp=2: colorize(
     lambda n: ('{:,.%df}' % dp).format(n),
     F(q),
     ['yellow', 'cyan'],
     [F(0)]
 )
 qty1 = lambda q: qty(q, 1)
-
-def qty0(q):
-    s, c = _qty(F(q))
-    return colored(s, c)
+qty0 = lambda q: qty(q, 0)
 
 def mulla(m):
     m = F(m)

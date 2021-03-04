@@ -81,6 +81,15 @@ def transactions():
     DataFrame Update 2 - Options information pulled from Robinhood
     """
 
+    feather = featherfile('transactions')
+    cache_exists = os.path.exists(feather)
+
+    T = None
+    if cache_exists:
+        T = pd.read_parquet(feather)
+        return T
+
+
     symbols = api.symbols(remove='expired')
     with ShadyBar('%48s' % 'Building Transactions', max=len(symbols) + 6) as bar:
         # 1. Download Stock Transactions from Robinhood...
@@ -293,8 +302,7 @@ def stocks(T, portfolio, portfolio_is_complete):
     if cache_exists:
         S = pd.read_parquet(feather)
         # TODO: This needs to be disabled when Fields is updated
-        if portfolio_is_complete:
-            return S
+        if portfolio_is_complete: return S
 
     data = _pull_processed_holdings_data(portfolio)
 
