@@ -662,17 +662,57 @@ financials = lambda ticker: _financials_agg()[ticker]
 def _quote_agg(): return _iex_aggregator('get_quote')
 quote = lambda ticker: _quote_agg()[ticker]
 
-
+################################################################################
+# Statement 1 of 3
 @cachier.cachier(stale_after=datetime.timedelta(days=30))
 @util.debug.measure
-def _cash_flow_agg(period='quarter'): return _iex_aggregator('get_cash_flow', period=period)
-cash_flow = lambda ticker, period='quarter': _cash_flow_agg(period=period)[ticker]['cashflow'][0]
+def _income_statement_agg(period, last):
+    return _iex_aggregator('get_income_statement', period=period, last=last)
 
 
+def income(ticker, period='quarter', last=6):
+    return _income_statement_agg(
+        period=period,
+        last=last,
+    )[ticker]['income']
+
+
+# Statement 2 of 3
+@cachier.cachier(stale_after=datetime.timedelta(weeks=13))
+@util.debug.measure
+def _cash_flow_agg(period, last):
+    return _iex_aggregator('get_cash_flow', period=period, last=last)
+
+
+def cashflow(ticker, period='quarter', last=6):
+    '''
+    x, y = zip(*[
+        (
+            util.datetime.parse(d['fiscalDate']),
+            d['cashFlow'] + d['capitalExpenditures']
+        ) for d in api.cashflow('TSLA')
+    ])
+    plt.plot(x, y); plt.show()
+    '''
+    return _cash_flow_agg(
+        period=period,
+        last=last,
+    )[ticker]['cashflow']
+
+
+# Statement 3 of 3
 @cachier.cachier(stale_after=datetime.timedelta(days=30))
 @util.debug.measure
-def _balance_sheet_agg(period='quarter'): return _iex_aggregator('get_balance_sheet', period=period)
-balance_sheet = lambda ticker, period='quarter': _balance_sheet_agg(period=period)[ticker]['balancesheet'][0]
+def _balance_sheet_agg(period, last):
+    return _iex_aggregator('get_balance_sheet', period=period, last=last)
+
+
+def balancesheet(ticker, period='quarter', last=6):
+    return _balance_sheet_agg(
+        period=period,
+        last=last,
+    )[ticker]['balancesheet']
+################################################################################
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=30))
