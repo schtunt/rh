@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 
-import os, sys, locale
-import time
+import locale
+import os
 import pathlib
-import click
-import colored_traceback.auto
+import time
 
+# import colored_traceback.auto
+# import rich.traceback
+import better_exceptions
+import click
 import pandas as pd
 
-import constants
-
-import api
-import fields
+# import fields
 import account
-
+import api
+import constants
 import util
-from util.numbers import F
+
+# from util.numbers import F
 
 upper = lambda l: list(map(lambda s: s.upper(), l))
 csv_list_flatten = lambda csvl: [token for csv in csvl for token in csv.split(',')]
+
 
 @click.group()
 @click.option('-D', '--debug', is_flag=True, default=False)
@@ -31,41 +34,44 @@ def cli(ctx, debug):
 CONTEXT_SETTINGS = dict(token_normalize_func=lambda x: x.lower())
 
 FIELD_GROUPS = {
-    'base': [ 'ticker' ],
-    'company': [ 'sector', 'industry', 'marketcap', 'ev', 'ebit', 'so' ],
-    'position': [ 'quantity', 'price', 'equity', 'percentage', 'cbps' ],
-    'ma': [ 'd200ma', 'd50ma' ],
-    'ltrends': [ 'equity_change', 'percent_change' ],
-    'strends': [ 'premium_collected', 'dividends_collected' ],
-    'daytrader': [ 'pcp', 'd1c%', 'd5c%', 'd30c%', 'first_traded', 'last_traded' ],
-    'ratios': [ 'p2e', 'p2b', 'p2s', 'peg' ],
-    'ratios-ii': [ 'sharpe', 'treynor', 'ebit2ev', 'beta' ],
-    'you-score': [ 'you_score%', 'cbps%', 'dyps%', 'pcps%' ],
-    'stock-score': [ 'stock_score%', 'malps%', 'momentum' ],
-    'options': [ 'urgency', 'next_expiry', 'activities' ],
+    'base': ['ticker'],
+    'category': ['sector', 'industry'],
+    'company': ['marketcap', 'so'],
+    'ev': ['ev', 'ebit', 'ebit2ev'],
+    'position': ['quantity', 'price', 'equity', 'percentage', 'cbps'],
+    'ma': ['d200ma', 'd50ma'],
+    'change': ['equity_change', 'percent_change'],
+    'income': ['premium_collected', 'dividends_collected'],
+    'performance': ['roe'],
+    'daytrader': ['pcp', 'd1c%', 'd5c%', 'd30c%', 'first_traded', 'last_traded'],
+    'ratios': ['p2e', 'p2b', 'p2s', 'peg', 'beta'],  # Valuation Ratios
+    'ratios-ii': ['sharpe', 'treynor'],
+    'you-score': ['you_score%', 'cbps%', 'dyps%', 'pcps%'],
+    'stock-score': ['stock_score%', 'malps%', 'momentum', 'analyst_score'],
+    'options': ['urgency', 'next_expiry', 'activities'],
 }
 
 VIEWS = {
     'all': {
         'sort_by': ['ticker'],
-        'fieldgroups': [ 'base', 'company', 'position', 'ratios', 'ratios-ii' ],
+        'fieldgroups': ['base', 'company', 'position', 'ratios', 'ratios-ii', 'ev'],
     },
     'perf': {
         'sort_by': ['ticker'],
         'fieldgroups': [
-            'base', 'position', 'you-score', 'stock-score', 'strends', 'ltrends',
-            'daytrader', 'ratios', 'ratios-ii'
+            'base', 'position', 'you-score', 'stock-score', 'income', 'change',
+            'daytrader', 'ratios', 'ratios-ii', 'ev', 'performance',
         ],
     },
     'options': {
         'sort_by': ['urgency'],
         'filter_by': 'next_expiry',
-        'fieldgroups': [ 'base', 'position', 'options' ],
+        'fieldgroups': ['base', 'position', 'options'],
     },
     'urgent': {
         'sort_by': ['next_expiry'],
         'filter_by': 'urgent',
-        'fieldgroups': [ 'base', 'position', 'options' ],
+        'fieldgroups': ['base', 'position', 'options'],
     },
 }
 
@@ -84,6 +90,7 @@ for view, configuration in VIEWS.items():
         filter_by=FILTERS[configuration.get('filter_by', None)],
         columns=[f for fg in configuration['fieldgroups'] for f in FIELD_GROUPS[fg]]
     )
+
 
 @cli.command(help='Refresh Data')
 @click.pass_context
@@ -144,6 +151,7 @@ def tabulize(ctx, view, sort_by, reverse, limit, tickers):
     )
     util.output.prtable(table)
 
+
 @cli.command(help='Account History')
 @click.option('-t', '--tickers', multiple=True, required=True)
 @click.pass_context
@@ -160,11 +168,16 @@ def history(ctx, tickers):
 
 
 def preinitialize():
+    os.environ['BETTER_EXCEPTIONS'] = 'TRUE'
+    better_exceptions.MAX_LENGTH = None
+    # rich.traceback.install()
+
     util.numbers.preinitialize()
     api.connect()
     locale.setlocale(locale.LC_ALL, '')
     if not pathlib.posixpath.exists(constants.CACHE_DIR):
         os.mkdir(constants.CACHE_DIR)
+
 
 if __name__ == '__main__':
     preinitialize()

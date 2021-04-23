@@ -1,55 +1,52 @@
 import os
 import sys
-import typing
-import pathlib
 import datetime
 import dataclasses
 import operator
 
 from collections import defaultdict
 from functools import reduce
+import numpy as np
+import pandas_datareader as pdr
 
 import util
+import util.debug
+import constants
 from util.numbers import F, NaN
 
 import cachier
 import hashlib
 
-import util
-import util.debug
-import constants
-
-import robin_stocks as rh
+import robin_stocks.robinhood as rh
 import iexfinance.stocks as iex
 import yahoo_earnings_calendar as _yec
 import finnhub as _fh
 import yfinance as yf
 import tiingo as tii
 from alpha_vantage.fundamentaldata import FundamentalData
-from alpha_vantage.sectorperformance import SectorPerformances
-from alpha_vantage.techindicators import TechIndicators
-from alpha_vantage.timeseries import TimeSeries
+# from alpha_vantage.sectorperformance import SectorPerformances
+# from alpha_vantage.techindicators import TechIndicators
+# from alpha_vantage.timeseries import TimeSeries
 
 from secrets import SECRETS
 
-
 TICKER_CHAIN = defaultdict(tuple)
 TICKER_CHAIN.update({
-    'STLA': ( 'FCAU', ),
-    'SIRI': ( 'P', ),
-    'AABAZZ': ( 'AABA', ),
-    'MDC': ( 'MDC1', ),
+    'STLA': ('FCAU',),
+    'STLAZZZ': ('STLA',),
+    'SIRI': ('P',),
+    'AABAZZ': ('AABA',),
+    'MDC': ('MDC1',),
 })
 
+
 def blacklist(full=False):
-    '''
+    """
     Modes:
      - full: remove expired and old tickers
      - half: remove expired tickers only
-    '''
-    blacklist = set((
-        'AABAZZ',
-    ))
+    """
+    blacklist = {'AABAZZ', 'STLAZZZ'}
 
     blacklist |= set(
         reduce(
@@ -71,6 +68,8 @@ blacklisted = lambda ticker, full=True: bool(ticker in blacklist(full))
 whitelisted = lambda ticker, full=False: bool(ticker not in blacklist(full))
 
 tockers4ticker = lambda ticker: set((ticker,) + TICKER_CHAIN[ticker])
+
+
 def tocker2ticker(tocker):
     for ticker, tockers in TICKER_CHAIN.items():
         if tocker in tockers:
@@ -80,21 +79,18 @@ def tocker2ticker(tocker):
 
 IEX_STOCKS = {}
 
-
 CONNECTIONS = {}
 
 
 @util.debug.measure
 def connect():
-    if len(CONNECTIONS) > 0: return
+    if len(CONNECTIONS) > 0:
+        return
 
     module = sys.modules[__name__]
 
-    secrets = defaultdict(lambda: None, SECRETS)
-    username, password = (
-        secrets['robinhood']['username'],
-        secrets['robinhood']['password'],
-    )
+    secrets = defaultdict(lambda: '_:_', SECRETS)
+    username, password = secrets['robinhood'].split(':')
     CONNECTIONS['rh'] = rh.login(username, password)
     rh.helper.set_output(open(os.devnull, "w"))
 
@@ -116,8 +112,8 @@ def connect():
 
     alpha_vantage_api_key = secrets['alpha_vantage_api_key']
     os.environ['ALPHAVANTAGE_API_KEY'] = alpha_vantage_api_key
-    #ts = TimeSeries(key='YOUR_API_KEY', output_format='pandas')
-    #data, meta_data = ts.get_intraday(symbol='MSFT',interval='1min', outputsize='full')
+    # ts = TimeSeries(key='YOUR_API_KEY', output_format='pandas')
+    # data, meta_data = ts.get_intraday(symbol='MSFT',interval='1min', outputsize='full')
 
     CONNECTIONS['av'] = dict(
         fd=FundamentalData()
@@ -130,6 +126,7 @@ def connect():
     ))
     module.tii = CONNECTIONS['tii']
 
+
 @util.debug.measure
 def connected(fn):
     def connected(*args, **kwargs):
@@ -138,13 +135,18 @@ def connected(fn):
 
     return connected
 
+
 # MonkeyLearn -={
 news_blob_hash = lambda *args, **kwargs: hashlib.sha1('|'.join(args[0][0]).encode('utf-8')).digest()
+
+
 @cachier.cachier(stale_after=datetime.timedelta(hours=4), hash_params=news_blob_hash)
 @util.debug.measure
 def sentiments(blob):
     response = CONNECTIONS['ml'].classifiers.classify('cl_pi3C7JiL', blob)
     return response.body
+
+
 # }=-
 # AlphaVantage -={
 # fd.get_company_overview
@@ -162,16 +164,19 @@ def sentiments(blob):
 # 'LastSplitFactor', 'LastSplitDate'
 
 _AV_STOP = False
+
+
 @cachier.cachier(stale_after=datetime.timedelta(days=1))
 def _overview(ticker):
-    '''
+    """
     The free-tier of AV imposes a 500/day day-limit, and a 5/minute rate-limit.  Hence it will
     not be rare to find this function returning `None'.  The wrappers need to handle this as a
     non-exceptional event.
-    '''
+    """
     global _AV_STOP
 
-    if _AV_STOP: return None
+    if _AV_STOP:
+        return None
 
     try:
         return CONNECTIONS['av']['fd'].get_company_overview(ticker)[0]
@@ -179,7 +184,8 @@ def _overview(ticker):
         _AV_STOP = True
         return None
 
-#def sector(ticker):
+
+# def sector(ticker):
 #    overview = _overview(ticker)
 #    return overview['Sector'] if overview is not None else 'N/A'
 
@@ -187,6 +193,7 @@ def _overview(ticker):
 def industry(ticker):
     overview = _overview(ticker)
     return overview['Industry'] if overview is not None else 'N/A'
+
 
 # fd.get_balance_sheet_annual
 # 'fiscalDateEnding', 'reportedCurrency', 'totalAssets',
@@ -222,6 +229,8 @@ def recommendations(ticker):
 @util.debug.measure
 def target(ticker):
     return CONNECTIONS['fh'].price_target(ticker)
+
+
 # }=-
 # RH -={
 @cachier.cachier(stale_after=datetime.timedelta(days=300))
@@ -233,9 +242,9 @@ def instrument2symbol(url):
 @cachier.cachier(stale_after=datetime.timedelta(hours=1))
 @util.debug.measure
 def symbols(remove='old+expired'):
-    '''
+    """
     The `superset' flag will also add older symbols, but not expired ones.
-    '''
+    """
 
     symbols = set(
         map(
@@ -246,12 +255,9 @@ def symbols(remove='old+expired'):
         holdings().keys()
     )
 
-    if remove is not None:
-        remove = remove.split('+')
+    remove = remove.split('+')
 
-    if remove is None:
-        pass
-    elif 'expired' in remove and 'old' in remove:
+    if 'expired' in remove and 'old' in remove:
         # remove expired and old
         symbols -= blacklist(full=True)
     elif 'expired' in remove:
@@ -259,10 +265,11 @@ def symbols(remove='old+expired'):
         symbols -= blacklist(full=False)
     elif 'old' in remove:
         # remove just old (no use-case for this)
-        #symbols -= (blacklist(full=True) - blacklist(full=False))
+        # symbols -= (blacklist(full=True) - blacklist(full=False))
         raise RuntimeError('Why?')
 
     return tuple(sorted(list(symbols)))
+
 
 @cachier.cachier(stale_after=datetime.timedelta(days=2))
 @util.debug.measure
@@ -282,6 +289,28 @@ def holdings():
     return rh.account.build_holdings()
 
 
+@cachier.cachier(stale_after=datetime.timedelta(hours=6))
+@util.debug.measure
+def _ratings(ticker):
+    return rh.get_ratings(ticker)
+
+
+def ratings(ticker):
+    s = _ratings(ticker)['summary']
+
+    if s is None:
+        return NaN
+
+    buy = s['num_buy_ratings']
+    sell = s['num_sell_ratings']
+    hold = s['num_hold_ratings']
+
+    signum = +1 if buy > sell else -1
+    magnitude = np.sqrt(abs(buy ** 2 - sell ** 2)) / np.log(np.e + hold)
+
+    return signum * magnitude
+
+
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @util.debug.measure
 def instrument(url):
@@ -298,14 +327,18 @@ def _dividends_agg():
         dividends[ticker].append(datum)
     return dividends
 
-def dividends(ticker):
+
+def dividends(ticker: str):
     dividends = _dividends_agg()
     return dividends[ticker]
+
 
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @util.debug.measure
 def ticker(uri):
     return rh.stocks.get_name_by_url(uri).upper()
+
+
 # }=-
 # RH Orders -={
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
@@ -321,7 +354,9 @@ def positions(otype, ostate, info=None):
             'open': rh.account.get_open_stock_positions,
         },
     }[otype][ostate](info)
-    #rh.options.get_aggregate_positions
+    # rh.options.get_aggregate_positions
+
+
 # }=-
 # RH Positions -={
 @cachier.cachier(stale_after=datetime.timedelta(hours=2))
@@ -337,9 +372,13 @@ def orders(otype, ostate, info=None):
             'open': rh.orders.get_all_open_stock_orders,
         },
     }[otype][ostate](info)
+
+
 # }=-
 # RH Ticker Endpoints -={
 FUNDAMENTALS = {}
+
+
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @util.debug.measure
 def _fundamentals_agg():
@@ -347,6 +386,7 @@ def _fundamentals_agg():
     for tickers in util.chunk(symbols(), 32):
         fun.update(dict(zip(tickers, rh.stocks.get_fundamentals(tickers))))
     return fun
+
 
 @util.debug.measure
 def fundamentals(ticker):
@@ -356,8 +396,10 @@ def fundamentals(ticker):
         FUNDAMENTALS[ticker] = rh.stocks.get_fundamentals(ticker)[0]
     return FUNDAMENTALS[ticker]
 
-def float(ticker):
+
+def ffloat(ticker):
     return F(fundamentals(ticker)['float'])
+
 
 # }=-
 
@@ -367,14 +409,16 @@ def events(ticker):
     return rh.stocks.get_events(ticker)
 
 
-
 # IEX Aggregation -={
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @util.debug.measure
-def _iex_aggregator(fn_name, **kwargs):
+def _iex_aggregator(fn_name: str, **kwargs: object) -> dict:
     agg = dict()
+
     for chunk in util.chunk(symbols(remove='expired'), 100):
-        fn = getattr(iex.Stock(list(chunk)), fn_name)
+        tickers = list(chunk)
+        fn = getattr(iex.Stock(tickers), fn_name)
+
         retrieved = fn(**kwargs)
         if type(retrieved) is list:
             data = defaultdict(list)
@@ -407,34 +451,43 @@ def _prices_last_year_agg():
         symbols, data_source='yahoo', start=when, end=when
     )['Adj Close'].values[0]
     return dict(zip(symbols(), map(F, prices)))
+
+
 _prices_last_year = lambda ticker: _prices_last_year_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=3))
 @util.debug.measure
-def _price_agg(): return { t: F(p) for t, p in _iex_aggregator('get_price').items() }
+def _price_agg(): return {t: F(p) for t, p in _iex_aggregator('get_price').items()}
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=1))
 @util.debug.measure
 def _stats_key_agg(): return _iex_aggregator('get_key_stats')
+
+
 _stats_key = lambda ticker: _stats_key_agg()[ticker]
+
 
 @cachier.cachier(stale_after=datetime.timedelta(days=7))
 @util.debug.measure
 def _stats_advanced_agg(): return _iex_aggregator('get_advanced_stats')
-_stats_advanced = lambda ticker: _stats_advanced_agg()[ticker]
-#'forwardPERatio', 'pegRatio', 'peHigh', 'peLow',
-#'week52highDate', 'week52lowDate', 'putCallRatio',
-#'week52high', 'week52low', 'week52highSplitAdjustOnly', 'week52highDateSplitAdjustOnly',
-#'week52lowSplitAdjustOnly', 'week52lowDateSplitAdjustOnly', 'week52change',
-#'avg10Volume', 'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees',
-#'ttmEPS', 'ttmDividendRate', 'dividendYield', 'nextDividendDate', 'exDividendDate',
-#'nextEarningsDate', 'peRatio', 'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent',
-#'year1ChangePercent', 'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent',
-#'month1ChangePercent', 'day30ChangePercent', 'day5ChangePercent'
 
-#IEX_KEY_STATS={
+
+_stats_advanced = lambda ticker: _stats_advanced_agg()[ticker]
+
+
+# 'forwardPERatio', 'pegRatio', 'peHigh', 'peLow',
+# 'week52highDate', 'week52lowDate', 'putCallRatio',
+# 'week52high', 'week52low', 'week52highSplitAdjustOnly', 'week52highDateSplitAdjustOnly',
+# 'week52lowSplitAdjustOnly', 'week52lowDateSplitAdjustOnly', 'week52change',
+# 'avg10Volume', 'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees',
+# 'ttmEPS', 'ttmDividendRate', 'dividendYield', 'nextDividendDate', 'exDividendDate',
+# 'nextEarningsDate', 'peRatio', 'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent',
+# 'year1ChangePercent', 'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent',
+# 'month1ChangePercent', 'day30ChangePercent', 'day5ChangePercent'
+
+# IEX_KEY_STATS={
 #    'companyName', 'marketcap', 'week52high', 'week52low', 'week52highSplitAdjustOnly',
 #    'week52lowSplitAdjustOnly', 'week52change', 'sharesOutstanding', 'avg10Volume',
 #    'avg30Volume', 'day200MovingAvg', 'day50MovingAvg', 'employees', 'ttmEPS', 'ttmDividendRate',
@@ -442,111 +495,169 @@ _stats_advanced = lambda ticker: _stats_advanced_agg()[ticker]
 #    'maxChangePercent', 'year5ChangePercent', 'year2ChangePercent', 'year1ChangePercent',
 #    'ytdChangePercent', 'month6ChangePercent', 'month3ChangePercent', 'month1ChangePercent',
 #    'day30ChangePercent', 'day5ChangePercent'
-#}
+# }
 def stats(ticker=None):
-    '''
+    """
     Advanced stats are expensive, and so cached for longer periods.  The basic stats are
     a subset of the advanced stats, cheaper, and so cached for shoter periods.  Here we
     mask the two calls, take the advanced stats, and update it with the fresher, albeir,
     crapier basic "key" stats.
-    '''
+    """
     advanced = _stats_advanced_agg()
     basic = _stats_key_agg()
-    merged = {ticker: datum|advanced[ticker] for ticker,datum in advanced.items()}
+    merged = {ticker: datum | advanced[ticker] for ticker, datum in advanced.items()}
     return merged if ticker is None else merged[ticker]
 
+
 def ebitda(ticker):
-    '''
+    """
     Earnings Before Interest, Taxes, Depreciation and Amortization
     Used to measure the cash flow of a business.
-    '''
+    """
     key = 'EBITDA'
     return F(stats(ticker)[key])
 
+
 def ebit(ticker):
-    '''
+    """
     Earnings Before Interest and Taxes; also referred to as `operating earnings',
     `operating profit', and `profit before interest and taxes'.
 
     EBIT is used to measure a firm's operating income.
 
     EBIT can be calculated as revenue minus expenses excluding tax and interest.
-    '''
+    """
 
     key = 'ebit'
     f = financials(ticker)
     return NaN if f is None else F(f[key])
 
+
 def ebt(ticker):
-    '''
+    """
     Earnings Before Taxes
     While used for essentially the same purpose as EBIT, this represents a firm's operating
     income after accounting for expenses outside of the firm's control.
-    '''
+    """
     return
 
+
 def dividends_paid(ticker):
-    '''
+    """
     This is dividends paid by the company, nothing to do with Robinhood profile and individual's
     account.
-    '''
+    """
     key = 'dividendsPaid'
     f = financials(ticker)
     return NaN if f is None else F(f[key])
 
-def income(ticker):
+
+def roe(ticker):
+    """
+    Return on equity (ROE) is a measure of financial performance calculated by dividing net
+    income by shareholders' equity. Because shareholders' equity is equal to a company’s assets
+    minus its debt, ROE is considered the return on net assets. ROE is considered a measure of
+    the profitability of a corporation in relation to stockholders’ equity.
+
+    https://www.investopedia.com/terms/r/returnonequity.asp
+
+    The ROE bridges the gap between the income statement and the balance sheet.
+
+    ROE analysis is unreliable when:
+    - special dividends
+    - negative equity (cash buybacks)
+    - negative equity (recent return to profitability)
+    - no peer group (ROE is only meaningful when used comparitively)
+    """
+    netinc = earnings(ticker)
+    bs = balancesheet(ticker, period='quarter', last=1)
+
+    if len(bs) == 0:
+        return NaN
+
+    return netinc / F(bs[0]['shareholderEquity'])
+
+
+def earnings(ticker, period='quarter'):
     key = 'netIncome'
-    f = financials(ticker)
+    f = financials(ticker, period=period)
     return NaN if f is None else F(f[key])
+
 
 def liabilities(ticker):
     key = 'totalLiabilities'
     return F(financials(ticker)[key])
-    f = financials(ticker)
-    return NaN if f is None else F(f[key])
+    # f = financials(ticker)
+    # return NaN if f is None else F(f[key])
+
 
 def debt(ticker):
     key = 'totalDebt'
     f = financials(ticker)
     return NaN if f is None else F(f[key])
 
+
 def assets(ticker):
     key = 'totalAssets'
     f = financials(ticker)
     return NaN if f is None else F(f[key])
+
 
 def cash(ticker):
     key = 'totalCash'
     f = financials(ticker)
     return NaN if f is None else F(f[key])
 
+
 def equity(ticker):
     key = 'shareholderEquity'
     f = financials(ticker)
     return NaN if f is None else F(f[key])
 
+
 def roc(ticker):
-    '''
+    """
     Rate of Change
-    '''
+    """
     p0 = _prices_last_year(ticker)
     pNow = price(ticker)
     return
 
+
+def debt2(ticker, ratio=None):
+    key = 'currentDebt' if ratio is None else 'debtToEquity'
+    return F(stats(ticker)[key])
+
+
 def roic(ticker):
-    '''
+    """
     Return On Invested Capital
 
     roic = Net Operating Profits After Tax (NOPAT) / Invested Capital
          = (Net Income - Dividend) / (Debt + Equity)
 
     https://www.investopedia.com/articles/fundamental/03/050603.asp
-    '''
+    """
     return (
-        income(ticker) - dividends_paid(ticker)
+        earnings(ticker) - dividends_paid(ticker)
     ) / (
-        debt(ticker) + equity(ticker)
+        debt2(ticker) + equity(ticker)
     )
+
+
+def rota(ticker):
+    """
+    Return on Total Assets
+    """
+    return 0
+
+
+def ronw(ticker):
+    """
+    Return on Net Worth
+    """
+    return 0
+
 
 def av(ticker, av):
     return F(stats(ticker)[dict(
@@ -554,11 +665,13 @@ def av(ticker, av):
         a30v='avg30Volume',
     )[av]])
 
+
 def ma(ticker, ma):
     return F(stats(ticker)[dict(
         d200ma='day200MovingAvg',
         d50ma='day50MovingAvg',
     )[ma]])
+
 
 def cp(ticker, cp):
     return F(stats(ticker)[dict(
@@ -577,54 +690,67 @@ def beta(ticker):
     key = 'beta'
     return F(stats(ticker)[key])
 
+
 def shares_outstanding(ticker):
     key = 'sharesOutstanding'
     return F(stats(ticker)[key])
 
-def cash(ticker, total=True):
-    if total: key = 'totalCash'
-    return F(stats(ticker)[key])
 
-def debt(ticker, ratio=None):
-    if ratio is None: key = 'currentDebt'
-    else: key = 'debtToEquity'
-
-    return F(stats(ticker)[key])
+# def cash(ticker, total=True):
+#    if total: key = 'totalCash'
+#    return F(stats(ticker)[key])
 
 def revenue(ticker, total=False, per=None):
     assert per is None or total is False
 
-    if per == 'share': key = 'revenuePerShare'
-    elif per == 'employee': key = 'revenuePerEmployee'
-    elif total: key = 'totalRevenue'
-    else: key = 'revenue'
+    if per == 'share':
+        key = 'revenuePerShare'
+    elif per == 'employee':
+        key = 'revenuePerEmployee'
+    elif total:
+        key = 'totalRevenue'
+    else:
+        key = 'revenue'
 
     return F(stats(ticker)[key])
+
 
 def marketcap(ticker):
     key = 'marketcap'
     return F(stats(ticker)[key])
 
+
 def profit_margin(ticker):
     key = 'profitMargin'
     return F(stats(ticker)[key])
 
+
 def price(ticker, ratio=None):
-    if ratio is None: return _price_agg()[ticker]
-    elif ratio == 'peg': key = 'pegRatio'
-    elif ratio == 'p2e': key = 'peRatio'
-    elif ratio == 'p2s': key = 'priceToSales'
-    elif ratio == 'p2b': key = 'priceToBook'
+    """
+    Valuation Multiples/Ratios
+    - P/E Ratio: what it is that you are actually paying for; aka, "earnings multiple"
+    - P/E/G Ratio (G is expected growth)
+    """
+    if ratio is None:
+        return _price_agg()[ticker]
+
+    key = {
+        'peg': 'pegRatio',
+        'p2e': 'peRatio',
+        'p2s': 'priceToSales',
+        'p2b': 'priceToBook',
+    }[ratio]
 
     return F(stats(ticker)[key])
 
+
 def ev(ticker, ratio=None):
-    '''
+    """
     Enterprise Value
 
     To calculate enterprise value, add the company's market capitalization to its outstanding
     preferred stock and all debt obligations, then subtract all of its cash and cash equivalents.
-    '''
+    """
 
     numerator = 'enterpriseValue'
     denominator = None
@@ -645,6 +771,7 @@ def ev(ticker, ratio=None):
         1 if denominator is None else s[denominator]
     )
 
+
 @cachier.cachier(stale_after=datetime.timedelta(days=90))
 @util.debug.measure
 def _sector_agg(): return _iex_aggregator('get_sector')
@@ -653,14 +780,17 @@ sector = lambda ticker: _sector_agg()[ticker]
 
 @cachier.cachier(stale_after=datetime.timedelta(weeks=4))
 @util.debug.measure
-def _financials_agg(): return _iex_aggregator('get_financials')
-financials = lambda ticker: _financials_agg()[ticker]
+def _financials_agg(period): return _iex_aggregator('get_financials', period=period)
+financials = lambda ticker, period='quarter': _financials_agg(period=period)[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=12))
 @util.debug.measure
 def _quote_agg(): return _iex_aggregator('get_quote')
+
+
 quote = lambda ticker: _quote_agg()[ticker]
+
 
 ################################################################################
 # Statement 1 of 3
@@ -685,7 +815,7 @@ def _cash_flow_agg(period, last):
 
 
 def cashflow(ticker, period='quarter', last=6):
-    '''
+    """
     x, y = zip(*[
         (
             util.datetime.parse(d['fiscalDate']),
@@ -693,7 +823,7 @@ def cashflow(ticker, period='quarter', last=6):
         ) for d in api.cashflow('TSLA')
     ])
     plt.plot(x, y); plt.show()
-    '''
+    """
     return _cash_flow_agg(
         period=period,
         last=last,
@@ -708,28 +838,41 @@ def _balance_sheet_agg(period, last):
 
 
 def balancesheet(ticker, period='quarter', last=6):
+    """
+    IEX Balance Sheet
+
+    shareholderEquity = totalAssets - totalLiabilities
+    shareholderEquity = goodwill + netTangibleAssets
+
+    """
     return _balance_sheet_agg(
         period=period,
         last=last,
-    )[ticker]['balancesheet']
+    )[ticker].get('balancesheet', [])
+
+
 ################################################################################
 
 
-@cachier.cachier(stale_after=datetime.timedelta(days=30))
-@util.debug.measure
-def _earnings_agg(): return _iex_aggregator('get_earnings')
-earnings = lambda ticker: _earnings_agg()[ticker] # NO_ACCESS
+# @cachier.cachier(stale_after=datetime.timedelta(days=30))
+# @util.debug.measure
+# def _earnings_agg(): return _iex_aggregator('get_earnings')
+# earnings = lambda ticker: _earnings_agg()[ticker] # NO_ACCESS
 
 
 @cachier.cachier(stale_after=datetime.timedelta(days=30))
 @util.debug.measure
 def _insider_transactions_agg(): return _iex_aggregator('get_insider_transactions')
+
+
 insider_transactions = lambda ticker: _insider_transactions_agg()[ticker]
 
 
 @cachier.cachier(stale_after=datetime.timedelta(weeks=1))
 @util.debug.measure
 def _splits_agg(): return _iex_aggregator('get_splits')
+
+
 splits = lambda ticker: _splits_agg().get(ticker, [])
 
 
@@ -741,11 +884,12 @@ previous_day_prices = lambda ticker: _previous_day_prices_agg()[ticker]
 
 @cachier.cachier(stale_after=datetime.timedelta(hours=8))
 @util.debug.measure
-def _historical_prices_agg(range='7d', chartCloseOnly=True): return _iex_aggregator(
-    'get_historical_prices', range='7d', chartCloseOnly=True
-)
-historical_prices = lambda ticker, range='7d', chartCloseOnly=True: _historical_prices_agg(
-    range='7d', chartCloseOnly=chartCloseOnly
+def _historical_prices_agg(range='7d', chart_close_only=True):
+    return _iex_aggregator(
+        'get_historical_prices', range=range, chartCloseOnly=chart_close_only
+    )
+historical_prices = lambda ticker, range='7d', chart_close_only=True: _historical_prices_agg(
+    range='7d', chart_close_only=chart_close_only
 )[ticker]
 
 
@@ -769,21 +913,23 @@ def news(ticker, source):
         'rh': lambda: rh.stocks.get_news(ticker),
         'iex': lambda: iex_stock(ticker).get_news()
     }[source]()
+
+
 # }=-
 
 
 @dataclasses.dataclass
-class StockMultiplexor:
+class StockMultiplexer:
     iex: iex.Stock
-    yf:  yf.Ticker
+    yf: yf.Ticker
 
 
-def __getattr__(ticker: str) -> iex.Stock:
+def __getattr__(ticker: str) -> StockMultiplexer:
     _ticker = ticker.upper()
-    if _ticker not in symbols(remove=None):
+    if _ticker not in symbols(remove='no'):
         raise NameError("name `%s' is not defined, or a valid ticker symbol" % ticker)
 
-    return StockMultiplexor(
+    return StockMultiplexer(
         iex=iex_stock(ticker),
         yf=yf.Ticker(ticker),
     )

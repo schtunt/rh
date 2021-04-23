@@ -3,10 +3,8 @@ import statistics
 import scipy as sp
 import pandas as pd
 import numpy as np
-import datetime
 
 import typing
-import decimal
 import dataclasses
 
 from functools import reduce
@@ -19,27 +17,41 @@ import models
 from util.numbers import NaN, F
 from util.datetime import NaT
 
+
 def xxx(args, ret=None):
-    print('#'*80 + ' START')
+    print('#' * 80 + ' START')
     print()
     util.debug.ddump(args, force=True)
     print()
-    print('#'*80 + ' END')
+    print('#' * 80 + ' END')
     return args if ret is None else ret
 
 @dataclasses.dataclass
-class FieldComplexConstructor:
-    attributes: list[str]
-    chain:      list[typing.Callable]
+class FieldConstructor:
+    pass
+
+@dataclasses.dataclass
+class DumbField(FieldConstructor):
+    pass
+
+@dataclasses.dataclass
+class ComplexField(FieldConstructor):
+    attributes: list[str] = dataclasses.field(default_factory=list)
+    chain: list[typing.Callable] = dataclasses.field(default_factory=list)
+
+@dataclasses.dataclass
+class SimpleField(FieldConstructor):
+    caller: typing.Callable
 
 @dataclasses.dataclass
 class Field:
-    name: typing.AnyStr             # Field name
-    getter: FieldComplexConstructor # Getter function, or otherwise, a FieldComplexConstructor
-    pullcast: typing.Callable       # How to typecast the pulled data at inress
-    pushcast: typing.Callable       # How to format the output data at presentation
-    description: str                # Description of the field/column
-    documentation: str              # URL to Investopedia describing the field
+    name: typing.AnyStr  # Field name
+    getter: FieldConstructor   # SimpleField or ComplexField
+    pullcast: typing.Callable  # How to typecast the pulled data at inress
+    pushcast: typing.Callable  # How to format the output data at presentation
+    description: str  # Description of the field/column
+    documentation: str  # URL to Investopedia describing the field
+
 
 # Field Pullcast (Data Type / Typecasting) -={
 _PULLCAST = dict(
@@ -58,7 +70,7 @@ _PULLCAST = dict(
 _PUSHCAST = {
     'ticker': lambda t: util.color.colhashbold(t, t[0]),
     'price': util.color.mulla,
-    'pcp': util.color.mulla,               # Previous Close Price (PCP)
+    'pcp': util.color.mulla,  # Previous Close Price (PCP)
     'quantity': util.color.qty0,
     'average_buy_price': util.color.mulla,
     'equity': util.color.mulla,
@@ -70,7 +82,7 @@ _PUSHCAST = {
     'urgency': util.color.mpctr,
     'next_expiry': lambda d: util.color.qty(util.datetime.ttl(d)),
 }
-#. }=-
+# . }=-
 # Field Extensions -={
 # price, current stock price
 # pcp, previous closing price
@@ -102,11 +114,20 @@ IEX Provides: https://iexcloud.io/docs/api/ -> New Constructs Reported Fundament
 
 '''
 
+
 def _extensions(S, T):
-    return [
+    return (
+        Field(
+            name='roe',
+            getter=SimpleField(caller=api.roe),
+            pullcast=F,
+            pushcast=util.color.mpct,
+            description='Return On Equity',
+            documentation='https://www.investopedia.com/terms/r/returnonequity.asp',
+        ),
         Field(
             name='roic',
-            getter=api.roic,
+            getter=SimpleField(caller=api.roic),
             pullcast=F,
             pushcast=util.color.pct,
             description='ROIC',
@@ -114,7 +135,7 @@ def _extensions(S, T):
         ),
         Field(
             name='ebt',
-            getter=api.ebt,
+            getter=SimpleField(caller=api.ebt),
             pullcast=F,
             pushcast=util.color.mulla,
             description='EBT',
@@ -122,7 +143,7 @@ def _extensions(S, T):
         ),
         Field(
             name='ebit',
-            getter=api.ebit,
+            getter=SimpleField(caller=api.ebit),
             pullcast=F,
             pushcast=util.color.mulla,
             description='EBIT',
@@ -130,7 +151,7 @@ def _extensions(S, T):
         ),
         Field(
             name='ebitda',
-            getter=api.ebitda,
+            getter=SimpleField(caller=api.ebitda),
             pullcast=F,
             pushcast=util.color.mulla,
             description='EBITDA',
@@ -138,39 +159,39 @@ def _extensions(S, T):
         ),
         Field(
             name='p2e',
-            getter=lambda ticker: api.price(ticker, ratio='p2e'),
+            getter=SimpleField(caller=lambda ticker: api.price(ticker, ratio='p2e')),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.qty,
             description='P/E Ratio',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
         ),
         Field(
             name='p2b',
-            getter=lambda ticker: api.price(ticker, ratio='p2b'),
+            getter=SimpleField(caller=lambda ticker: api.price(ticker, ratio='p2b')),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.qty,
             description='P/B Ratio',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
         ),
         Field(
             name='p2s',
-            getter=lambda ticker: api.price(ticker, ratio='p2s'),
+            getter=SimpleField(caller=lambda ticker: api.price(ticker, ratio='p2s')),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.qty,
             description='P/S Ratio',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
         ),
         Field(
             name='peg',
-            getter=lambda ticker: api.price(ticker, ratio='peg'),
+            getter=SimpleField(caller=lambda ticker: api.price(ticker, ratio='peg')),
             pullcast=F,
-            pushcast=util.color.pct,
+            pushcast=util.color.qty,
             description='PEG Ratio',
             documentation='https://www.investopedia.com/terms/i/industry.asp',
         ),
         Field(
             name='industry',
-            getter=api.industry,
+            getter=SimpleField(caller=api.industry),
             pullcast=str,
             pushcast=util.color.colhashwrap,
             description='Industry',
@@ -178,7 +199,7 @@ def _extensions(S, T):
         ),
         Field(
             name='sector',
-            getter=api.sector,
+            getter=SimpleField(caller=api.sector),
             pullcast=str,
             pushcast=util.color.colhashwrap,
             description='Sector',
@@ -186,7 +207,7 @@ def _extensions(S, T):
         ),
         Field(
             name='ev',
-            getter=api.ev,
+            getter=SimpleField(caller=api.ev),
             pullcast=F,
             pushcast=util.color.mulla,
             description='Enterprise Value; the market value plus the net interest-bearing debt',
@@ -194,7 +215,7 @@ def _extensions(S, T):
         ),
         Field(
             name='so',
-            getter=api.shares_outstanding,
+            getter=SimpleField(caller=api.shares_outstanding),
             pullcast=F,
             pushcast=util.color.qty0,
             description='Shares Outstanding',
@@ -202,7 +223,7 @@ def _extensions(S, T):
         ),
         Field(
             name='marketcap',
-            getter=api.marketcap,
+            getter=SimpleField(caller=api.marketcap),
             pullcast=F,
             pushcast=util.color.mulla,
             description='Market Capitalization',
@@ -210,7 +231,7 @@ def _extensions(S, T):
         ),
         Field(
             name='beta',
-            getter=api.beta,
+            getter=SimpleField(caller=api.beta),
             pullcast=F,
             pushcast=util.color.qty,
             description='Beta',
@@ -234,7 +255,7 @@ def _extensions(S, T):
         ),
         Field(
             name='d50ma',
-            getter=lambda ticker: api.ma(ticker, 'd50ma'),
+            getter=SimpleField(caller=lambda ticker: api.ma(ticker, 'd50ma')),
             pullcast=F,
             pushcast=util.color.mulla,
             description='50-Day Moving Average',
@@ -242,7 +263,7 @@ def _extensions(S, T):
         ),
         Field(
             name='d200ma',
-            getter=lambda ticker: api.ma(ticker, 'd200ma'),
+            getter=SimpleField(caller=lambda ticker: api.ma(ticker, 'd200ma')),
             pullcast=F,
             pushcast=util.color.mulla,
             description='200-Day Moving Average',
@@ -250,7 +271,7 @@ def _extensions(S, T):
         ),
         Field(
             name='y5c%',
-            getter=lambda ticker: api.cp(ticker, 'y5cp'),
+            getter=SimpleField(caller=lambda ticker: api.cp(ticker, 'y5cp')),
             pullcast=F,
             pushcast=util.color.mpct,
             description='5-Year Percentage Change',
@@ -258,7 +279,7 @@ def _extensions(S, T):
         ),
         Field(
             name='y2c%',
-            getter=lambda ticker: api.cp(ticker, 'y2cp'),
+            getter=SimpleField(caller=lambda ticker: api.cp(ticker, 'y2cp')),
             pullcast=F,
             pushcast=util.color.mpct,
             description='2-Year Percentage Change',
@@ -266,7 +287,7 @@ def _extensions(S, T):
         ),
         Field(
             name='y1c%',
-            getter=lambda ticker: api.cp(ticker, 'y1cp'),
+            getter=SimpleField(caller=lambda ticker: api.cp(ticker, 'y1cp')),
             pullcast=F,
             pushcast=util.color.mpct,
             description='1-Year Percentage Change',
@@ -274,7 +295,7 @@ def _extensions(S, T):
         ),
         Field(
             name='m6c%',
-            getter=lambda ticker: api.cp(ticker, 'm6cp'),
+            getter=SimpleField(caller=lambda ticker: api.cp(ticker, 'm6cp')),
             pullcast=F,
             pushcast=util.color.mpct,
             description='6-Month Percentage Change',
@@ -282,7 +303,7 @@ def _extensions(S, T):
         ),
         Field(
             name='m3c%',
-            getter=lambda ticker: api.cp(ticker, 'm3cp'),
+            getter=SimpleField(caller=lambda ticker: api.cp(ticker, 'm3cp')),
             pullcast=F,
             pushcast=util.color.mpct,
             description='3-Month Percentage Change',
@@ -290,7 +311,7 @@ def _extensions(S, T):
         ),
         Field(
             name='m1c%',
-            getter=lambda ticker: api.cp(ticker, 'm1cp'),
+            getter=SimpleField(caller=lambda ticker: api.cp(ticker, 'm1cp')),
             pullcast=F,
             pushcast=util.color.mpct,
             description='1-Month Percentage Change',
@@ -298,7 +319,7 @@ def _extensions(S, T):
         ),
         Field(
             name='d30c%',
-            getter=lambda ticker: api.cp(ticker, 'd30cp'),
+            getter=SimpleField(caller=lambda ticker: api.cp(ticker, 'd30cp')),
             pullcast=F,
             pushcast=util.color.mpct,
             description='30-Day Percentage Change',
@@ -306,7 +327,7 @@ def _extensions(S, T):
         ),
         Field(
             name='d5c%',
-            getter=lambda ticker: api.cp(ticker, 'd5cp'),
+            getter=SimpleField(caller=lambda ticker: api.cp(ticker, 'd5cp')),
             pullcast=F,
             pushcast=util.color.mpct,
             description='5-Day Percentage Change',
@@ -314,7 +335,7 @@ def _extensions(S, T):
         ),
         Field(
             name='d1c%',
-            getter=lambda ticker: api.quote(ticker)['changePercent'],
+            getter=SimpleField(caller=lambda ticker: api.quote(ticker)['changePercent']),
             pullcast=F,
             pushcast=util.color.mpct,
             description="Change percent from previous trading day's close",
@@ -322,14 +343,14 @@ def _extensions(S, T):
         ),
         Field(
             name='malps%',
-            getter=FieldComplexConstructor(
-                attributes=(
+            getter=ComplexField(
+                attributes=[
                     'd200ma', 'd50ma', 'price',
-                ),
-                chain=(
+                ],
+                chain=[
                     lambda R: list(R.values()),
                     lambda R: -util.numbers.growth_score(R) / R[-1],
-                ),
+                ],
             ),
             pullcast=F,
             pushcast=util.color.mpct,
@@ -338,14 +359,12 @@ def _extensions(S, T):
         ),
         Field(
             name='cbps',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'ticker',
-                ),
-                chain=(
-                    lambda R: T[T['symbol']==R['ticker']],
+            getter=ComplexField(
+                attributes=['ticker'],
+                chain=[
+                    lambda R: T[T['symbol'] == R['ticker']],
                     lambda df: df['cbps'].values[-1],
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.mulla,
@@ -354,17 +373,15 @@ def _extensions(S, T):
         ),
         Field(
             name='cbps%',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'ticker',
-                ),
-                chain=(
+            getter=ComplexField(
+                attributes=['ticker'],
+                chain=[
                     lambda R: (
-                        T[T['symbol']==R['ticker']]['cbps'].values[-1]
+                        T[T['symbol'] == R['ticker']]['cbps'].values[-1]
                     ) / (
-                        S[S['ticker']==R['ticker']].price.item()
+                        S[S['ticker'] == R['ticker']].price.item()
                     ),
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.mpct,
@@ -373,11 +390,9 @@ def _extensions(S, T):
         ),
         Field(
             name='dyps%',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'ticker',
-                ),
-                chain=(
+            getter=ComplexField(
+                attributes=['ticker'],
+                chain=[
                     lambda R: R['ticker'],
                     lambda ticker: dict(
                         price=np.mean((
@@ -391,13 +406,13 @@ def _extensions(S, T):
                         ))),
                     ),
                     lambda d: sum(
-                        d['divs'][0] # dividend amount
+                        d['divs'][0]  # dividend amount
                     ) / sum(
-                        d['divs'][1] # number of stocks held at time of dividend payout
+                        d['divs'][1]  # number of stocks held at time of dividend payout
                     ) / (
-                        d['price'] # recency-weighted average of share price
+                        d['price']    # recency-weighted average of share price
                     ) if len(d['divs']) > 0 else 0,
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.mpct,
@@ -406,11 +421,9 @@ def _extensions(S, T):
         ),
         Field(
             name='pcps%',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'ticker',
-                ),
-                chain=(
+            getter=ComplexField(
+                attributes=['ticker'],
+                chain=[
                     lambda R: R['ticker'],
                     lambda ticker: dict(
                         price=np.mean((
@@ -418,17 +431,17 @@ def _extensions(S, T):
                             api.ma(ticker, ma='d50ma'),
                             api.price(ticker),
                         )),
-                        premcol=S[S['ticker']==ticker]['premium_collected'],
-                        bought=T[T['symbol']==ticker]['bought'].tail(1).item(),
+                        premcol=S[S['ticker'] == ticker]['premium_collected'],
+                        bought=T[T['symbol'] == ticker]['bought'].tail(1).item(),
                     ),
                     lambda d: (
-                        d['premcol'] # premium collected in total
+                        d['premcol']  # premium collected in total
                     ) / (
-                        d['bought'] # number of shares ever purchased
+                        d['bought']   # number of shares ever purchased
                     ) / (
-                        d['price'] # recency-weighted average of share price
+                        d['price']    # recency-weighted average of share price
                     ),
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.mpct,
@@ -437,14 +450,12 @@ def _extensions(S, T):
         ),
         Field(
             name='first_traded',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'ticker',
-                ),
-                chain=(
-                    lambda R: T[T['symbol']==R['ticker']].date,
+            getter=ComplexField(
+                attributes=['ticker'],
+                chain=[
+                    lambda R: T[T['symbol'] == R['ticker']].date,
                     lambda dates: min(dates) if len(dates) else -1,
-                )
+                ]
             ),
             pullcast=util.datetime.datetime,
             pushcast=lambda d: util.color.qty0(util.datetime.age(d)),
@@ -453,14 +464,12 @@ def _extensions(S, T):
         ),
         Field(
             name='last_traded',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'ticker',
-                ),
-                chain=(
-                    lambda R: T[T['symbol']==R['ticker']].date,
+            getter=ComplexField(
+                attributes=['ticker'],
+                chain=[
+                    lambda R: T[T['symbol'] == R['ticker']].date,
                     lambda dates: max(dates) if len(dates) else 999,
-                )
+                ]
             ),
             pullcast=util.datetime.datetime,
             pushcast=lambda d: util.color.qty0(util.datetime.age(d)),
@@ -469,18 +478,21 @@ def _extensions(S, T):
         ),
         Field(
             name='momentum',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'y5c%', 'y2c%', 'y1c%', 'm6c%', 'm3c%', 'm1c%', 'd30c%', 'd5c%',
-                ),
-                chain=(
+            getter=ComplexField(
+                attributes=[
+                    'y5c%', 'y2c%', 'y1c%',
+                    'm6c%', 'm3c%', 'm1c%',
+                    'd30c%', 'd5c%',
+                    'roe',
+                ],
+                chain=[
                     lambda R: [
                         sp.stats.percentileofscore(S[period], value)
                         for period, value in R.items()
                     ],
                     statistics.mean,
-                    lambda pct: pct / 100.0
-                )
+                    lambda pct: pct / 100.0,
+                ]
             ),
             pullcast=F,
             pushcast=util.color.mpct,
@@ -488,18 +500,30 @@ def _extensions(S, T):
             documentation='',
         ),
         Field(
+            name='analyst_score',
+            getter=ComplexField(
+                attributes=['ticker'],
+                chain=[
+                    lambda R: R['ticker'],
+                    api.ratings,
+                ],
+            ),
+            pullcast=F,
+            pushcast=util.color.qty,
+            description='Analyst (Morning Star) Ratings, converted to a single number',
+            documentation='',
+        ),
+        Field(
             name='you_score%',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'cbps%', 'dyps%', 'pcps%',
-                ),
-                chain=(
+            getter=ComplexField(
+                attributes=['cbps%', 'dyps%', 'pcps%'],
+                chain=[
                     lambda R: [
                         sp.stats.percentileofscore(S[period], value)
                         for period, value in R.items()
                     ],
                     statistics.mean
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.pct,
@@ -508,14 +532,12 @@ def _extensions(S, T):
         ),
         Field(
             name='stock_score%',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'malps%', 'momentum'
-                ),
-                chain=(
+            getter=ComplexField(
+                attributes=['malps%', 'momentum'],
+                chain=[
                     lambda R: R.values(),
                     sum,
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.mpct,
@@ -524,13 +546,11 @@ def _extensions(S, T):
         ),
         Field(
             name='sharpe',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'ticker',
-                ),
-                chain=(
+            getter=ComplexField(
+                attributes=['ticker'],
+                chain=[
                     lambda R: models.sharpe(ticker=R['ticker']),
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.pct,
@@ -539,13 +559,13 @@ def _extensions(S, T):
         ),
         Field(
             name='treynor',
-            getter=FieldComplexConstructor(
-                attributes=(
+            getter=ComplexField(
+                attributes=[
                     'ticker', 'beta'
-                ),
-                chain=(
+                ],
+                chain=[
                     lambda R: models.treynor(R['ticker'], R['beta']),
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.pct,
@@ -554,38 +574,37 @@ def _extensions(S, T):
         ),
         Field(
             name='ebit2ev',
-            getter=FieldComplexConstructor(
-                attributes=(
-                    'ebit', 'ev',
-                ),
-                chain=(
+            getter=ComplexField(
+                attributes=['ebit', 'ev'],
+                chain=[
                     lambda R: R['ebit'] / R['ev'],
-                )
+                ]
             ),
             pullcast=F,
             pushcast=util.color.mpct,
             description='Earnings yield; what the business earns in relation to its share price',
             documentation='',
         ),
-     ]
-
+    )
 # }=-
 
-def formatters():
-    '''The formatters control how the data is displayed at presentation time'''
 
-    formatters = dict(_PUSHCAST.items())
-    formatters.update(
+def formatters():
+    """The formatters control how the data is displayed at presentation time"""
+
+    _formatters = dict(_PUSHCAST.items())
+    _formatters.update(
         {field.name: field.pushcast for field in _extensions(None, None)}
     )
-    return defaultdict(lambda: str, formatters)
+    return defaultdict(lambda: str, _formatters)
+
 
 def _typecasters():
-    '''
+    """
     The typecasters control how the data is imported.  This includes only the
     base fields.  The old style of defining base fields was through _PULLCAST.
     The new style is via Field objects that have their getters set to None.
-    '''
+    """
 
     typecasters = dict(_PULLCAST.items())
     typecasters.update({
@@ -595,25 +614,28 @@ def _typecasters():
     })
     return defaultdict(lambda: str, typecasters)
 
+
 def _extend(S, field):
     figet = field.getter
     cast = field.pullcast
-    try:
-        if figet is None:
+    #try:
+    if True:
+        if type(figet) is DumbField:
             S[field.name] = S[field.name].apply(cast)
-        elif type(figet) is not FieldComplexConstructor:
+        elif type(figet) is SimpleField:
             series = []
             for ticker in S['ticker']:
-                datum = cast(figet(ticker))
+                datum = cast(figet.caller(ticker))
+                # on a negative cache hit, hit it again without cache enabled
                 if datum in (None, NaN, NaT, 'N/A'):
-                    datum = cast(figet(ticker, ignore_cache=True))
+                    datum = cast(figet.caller(ticker, ignore_cache=True))
                 series.append(datum)
             S[field.name] = series
-        else:
+        elif type(figet) is ComplexField:
             S[field.name] = pd.Series((
                 reduce(
                     lambda g, f: f(g),
-                    figet.chain + (field.pullcast,),
+                    figet.chain + [field.pullcast],
                     OrderedDict(zip(figet.attributes, components)),
                 ) for components in zip(
                     *map(
@@ -622,24 +644,25 @@ def _extend(S, field):
                     )
                 )
             ), index=S.index)
-    except Exception as e:
-        ErrorClass = type(e)
-        message = "Failed to extend field `%s'" % field.name
-        exception = ErrorClass('%s; %s' % (str(e), message))
-        raise exception.with_traceback(sys.exc_info()[2])
+    #except Exception as e:
+    #    exception = RuntimeError(
+    #        f"({type(e).__name__} on {str(e)}); failed to extend field `{field.name}'"
+    #    )
+    #    raise exception.with_traceback(sys.exc_info()[2])
 
 
 def denan(df):
-    '''Inplace replacement of `NaN's with mean of NaN cell's respective column'''
+    """Inplace replacement of `NaN's with mean of NaN cell's respective column"""
     means = df[df.keys()].mean(skipna=True, numeric_only=True)
     df.fillna(means, inplace=True)
 
+
 class Fields:
     def __init__(self, data):
-        '''
+        """
         Create new DataFrame first.  This DataFrame will be limited to the list of tickers
         supplied by the user, if any, otherwise as inclusive as the stored DataFrame.
-        '''
+        """
         typecasts = _typecasters()
         self._df = pd.DataFrame(
             map(
@@ -652,9 +675,9 @@ class Fields:
         )
 
     def refreshed(self, S):
-        '''
+        """
         Update the stored DataFrame `df' with the fresh data in `S'
-        '''
+        """
         if S is not None:
             S.set_index('ticker', inplace=True)
             S.update(self._df.set_index('ticker'))

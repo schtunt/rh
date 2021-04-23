@@ -45,6 +45,8 @@ A = account.Account()
 S = A._stocks
 T = A._transactions
 
+ticker = 'AAPL'
+
 print("Account Objects & DataFrames")
 print(" + A                      (Account Object)")
 print(" + S                      (Stocks DataFrame)")
